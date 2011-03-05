@@ -55,6 +55,10 @@
 #define ZOOM_UART_BASE		0x10000000
 #define ZOOM_UART_VIRT		0xfa400000
 
+/* External port on B&N Nook (encore) */
+#define ENCORE_UART_BASE       0x48000000
+#define ENCORE_UART_VIRT       0xfa000000
+
 #define OMAP_PORT_SHIFT		2
 #define OMAP7XX_PORT_SHIFT	0
 #define ZOOM_PORT_SHIFT		1
