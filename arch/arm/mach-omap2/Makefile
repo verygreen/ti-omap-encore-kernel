@@ -151,7 +151,8 @@ obj-$(CONFIG_MACH_DEVKIT8000)     	+= board-devkit8000.o \
                                            hsmmc.o
 obj-$(CONFIG_MACH_OMAP_LDP)		+= board-ldp.o \
 					   hsmmc.o
-obj-$(CONFIG_MACH_ENCORE)               += board-omap3encore.o
+obj-$(CONFIG_MACH_ENCORE)		+= board-omap3encore.o \
+					   hsmmc.o
 obj-$(CONFIG_MACH_OVERO)		+= board-overo.o \
 					   hsmmc.o
 obj-$(CONFIG_MACH_OMAP3EVM)		+= board-omap3evm.o \

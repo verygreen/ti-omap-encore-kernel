@@ -34,9 +34,13 @@
 #include <plat/smartreflex.h>
 
 static u8 twl4030_start_script_address = 0x2b;
+static uint32_t twl4030_rev;
 
 #define PWR_P1_SW_EVENTS	0x10
 #define PWR_DEVOFF	(1<<0)
+#define STOPON_PWRON (1<<6)
+#define CONFIG_P1_SW_FEATURES    STOPON_PWRON
+
 
 #define PHY_TO_OFF_PM_MASTER(p)		(p - 0x36)
 #define PHY_TO_OFF_PM_RECEIVER(p)	(p - 0x5b)
@@ -70,8 +74,19 @@ static u8 twl4030_start_script_address = 0x2b;
 #define CFG_ENABLE_SRFLX	0x08
 
 #define R_PROTECT_KEY		0x0E
-#define R_KEY_1			0xC0
-#define R_KEY_2			0x0C
+
+#define R_KEY_1			(twl_rev_is_tps65921() ? 0xFC : 0xC0)
+#define R_KEY_2			(twl_rev_is_tps65921() ? 0x96 : 0x0C)
+
+#define R_UNLOCK_TEST_REG	0x12
+#define TWL_EEPROM_R_UNLOCK	0x49
+
+#define TWL_SIL_TYPE(rev)	((rev) & 0x00FFFFFF)
+#define TWL_SIL_REV(rev)	((rev) >> 24)
+#define TWL_SIL_5030		0x09002F
+#define TWL_SIL_TPS65921	0x77802F
+#define TWL_REV_1_0		0x00
+#define TWL_REV_1_1		0x10
 
 /* resource configuration registers
    <RESOURCE>_DEV_GRP   at address 'n+0'
@@ -302,7 +317,7 @@ static int __init twl4030_config_warmreset_sequence(u8 address)
 	if (err)
 		goto out;
 
-	rd_data |= ENABLE_WARMRESET;
+	rd_data |= ENABLE_WARMRESET | CONFIG_P1_SW_FEATURES;
 	err = twl_i2c_write_u8(TWL4030_MODULE_PM_MASTER, rd_data,
 				R_P1_SW_EVENTS);
 	if (err)
@@ -313,7 +328,7 @@ static int __init twl4030_config_warmreset_sequence(u8 address)
 	if (err)
 		goto out;
 
-	rd_data |= ENABLE_WARMRESET;
+	rd_data |= ENABLE_WARMRESET | CONFIG_P1_SW_FEATURES;
 	err = twl_i2c_write_u8(TWL4030_MODULE_PM_MASTER, rd_data,
 				R_P2_SW_EVENTS);
 	if (err)
@@ -324,7 +339,7 @@ static int __init twl4030_config_warmreset_sequence(u8 address)
 	if (err)
 		goto out;
 
-	rd_data |= ENABLE_WARMRESET;
+	rd_data |= ENABLE_WARMRESET | CONFIG_P1_SW_FEATURES;
 	err = twl_i2c_write_u8(TWL4030_MODULE_PM_MASTER, rd_data,
 				R_P3_SW_EVENTS);
 out:
@@ -538,6 +553,36 @@ void __init twl4030_power_sr_init()
 {
 	/* Register the SR init API with the Smartreflex driver */
 	omap_sr_register_pmic(&twl4030_sr_data);
+}
+
+static void twl4030_load_rev(void)
+{
+	int err;
+
+	err = twl_i2c_write_u8(TWL4030_MODULE_INTBR,
+			TWL_EEPROM_R_UNLOCK, R_UNLOCK_TEST_REG);
+	if (err)
+		pr_err("TWL4030 Unable to unlock IDCODE registers\n");
+
+	err = twl_i2c_read(TWL4030_MODULE_INTBR, (u8 *)(&twl4030_rev),
+			0x0, 4);
+	if (err)
+		pr_err("TWL4030: unable to read IDCODE-%d\n", err);
+
+	err = twl_i2c_write_u8(TWL4030_MODULE_INTBR, 0x0,
+			R_UNLOCK_TEST_REG);
+	if (err)
+		pr_err("TWL4030 Unable to relock IDCODE registers\n");
+}
+
+
+
+bool twl_rev_is_tps65921(void)
+{
+	if (twl4030_rev == 0)
+		twl4030_load_rev();
+
+	return TWL_SIL_TYPE(twl4030_rev) == TWL_SIL_TPS65921;
 }
 
 void __init twl4030_power_init(struct twl4030_power_data *twl4030_scripts)

@@ -32,6 +32,7 @@
 #include <asm/mach-types.h>
 #include <asm/mach/arch.h>
 #include <asm/mach/map.h>
+#include <linux/mmc/host.h>
 
 #include <plat/mcspi.h>
 #include <mach/gpio.h>
@@ -48,15 +49,15 @@
 #include <plat/sram.h>
 
 #include <plat/display.h>
+#include <plat/mmc.h>
 #include <plat/omap-serial.h>
 
 #include <plat/opp_twl_tps.h>
 
-#include <linux/usb/android_composite.h>
-
 #include <plat/system.h>
 
 #include "mux.h"
+#include "hsmmc.h"
 #include "omap3-opp.h"
 #include "prcm-common.h"
 
@@ -162,14 +163,135 @@ static struct twl4030_usb_data encore_usb_data = {
 #endif
 };
 
-#if 0
+static struct regulator_consumer_supply encore_vmmc1_supply[] = {
+	REGULATOR_SUPPLY("vmmc", "omap_hsmmc.0"),
+};
+
+static struct regulator_consumer_supply encore_vdda_dac_supply[] = {
+	REGULATOR_SUPPLY("vdda_dac", "omapdss_venc"),
+};
+
+/* VMMC1 for OMAP VDD_MMC1 (i/o) and MMC1 card */
+static struct regulator_init_data encore_vmmc1 = {
+	.constraints = {
+		.min_uV			= 1850000,
+		.max_uV			= 3150000,
+		.valid_modes_mask	= REGULATOR_MODE_NORMAL
+					| REGULATOR_MODE_STANDBY,
+		.valid_ops_mask		= REGULATOR_CHANGE_VOLTAGE
+					| REGULATOR_CHANGE_MODE
+					| REGULATOR_CHANGE_STATUS,
+	},
+	.num_consumer_supplies  = ARRAY_SIZE(encore_vmmc1_supply),
+	.consumer_supplies      = encore_vmmc1_supply,
+};
+
+static struct regulator_init_data encore_vdac = {
+	.constraints = {
+		.min_uV                 = 1800000,
+		.max_uV                 = 1800000,
+		.valid_modes_mask       = REGULATOR_MODE_NORMAL
+					| REGULATOR_MODE_STANDBY,
+		.valid_ops_mask         = REGULATOR_CHANGE_MODE
+					| REGULATOR_CHANGE_STATUS,
+	},
+	.num_consumer_supplies  = ARRAY_SIZE(encore_vdda_dac_supply),
+	.consumer_supplies      = encore_vdda_dac_supply,
+};
+
+/* The order is reverted in this table so that internal eMMC is presented
+ * as first mmc card for compatibility with existing android installations */
+static struct omap2_hsmmc_info mmc[] __initdata = {
+	{
+		.name		= "internal",
+		.mmc		= 2,
+		.caps		= MMC_CAP_4_BIT_DATA | MMC_CAP_8_BIT_DATA,
+		.gpio_cd	= -EINVAL,
+		.gpio_wp	= -EINVAL,
+		.nonremovable	= true,
+		.power_saving	= true,
+		.ocr_mask	= MMC_VDD_165_195, /* 1.85V */
+	},
+	{
+		.name		= "external",
+		.mmc		= 1,
+		.caps		= MMC_CAP_4_BIT_DATA,
+		.gpio_cd	= -EINVAL,
+		.gpio_wp	= -EINVAL,
+		.power_saving	= true,
+	},
+	{
+		.name		= "internal",
+		.mmc		= 3,
+		.caps		= MMC_CAP_4_BIT_DATA,
+		.gpio_cd	= -EINVAL,
+		.gpio_wp	= -EINVAL,
+		.nonremovable	= true,
+		.power_saving	= true,
+	},
+	{}      /* Terminator */
+};
+
+static int encore_hsmmc_card_detect(struct device *dev, int slot)
+{
+	struct omap_mmc_platform_data *mmc = dev->platform_data;
+
+	/* Encore board EVT2 and later has pin high when card is present) */
+	return gpio_get_value_cansleep(mmc->slots[0].switch_pin);
+}
+
+static int encore_twl4030_hsmmc_late_init(struct device *dev)
+{
+	int ret = 0;
+	struct platform_device *pdev = container_of(dev,
+						   struct platform_device, dev);
+	struct omap_mmc_platform_data *pdata = dev->platform_data;
+
+	if(is_encore_board_evt2()) {
+		/* Setting MMC1 (external) Card detect */
+		if (pdev->id == 0) {
+			pdata->slots[0].card_detect = encore_hsmmc_card_detect;
+		}
+	}
+
+	return ret;
+}
+
+static __init void encore_hsmmc_set_late_init(struct device *dev)
+{
+	struct omap_mmc_platform_data *pdata;
+
+	/* dev can be null if CONFIG_MMC_OMAP_HS is not set */
+	if (!dev)
+		return;
+
+	pdata = dev->platform_data;
+	pdata->init = encore_twl4030_hsmmc_late_init;
+}
+
+static int __ref encore_twl_gpio_setup(struct device *dev,
+		unsigned gpio, unsigned ngpio)
+{
+	struct omap2_hsmmc_info *c;
+	/* gpio + 0 is "mmc0_cd" (input/IRQ),
+	 * gpio + 1 is "mmc1_cd" (input/IRQ)
+	 */
+printk("******IN boxer_twl_gpio_setup********\n");
+	mmc[1].gpio_cd = gpio + 0;
+	mmc[0].gpio_cd = gpio + 1;
+	omap2_hsmmc_init(mmc);
+	for (c = mmc; c->mmc; c++)
+		encore_hsmmc_set_late_init(c->dev);
+
+	return 0;
+}
+
 static struct twl4030_gpio_platform_data encore_gpio_data = {
 	.gpio_base	= OMAP_MAX_GPIO_LINES,
 	.irq_base	= TWL4030_GPIO_IRQ_BASE,
 	.irq_end	= TWL4030_GPIO_IRQ_END,
 	.setup		= encore_twl_gpio_setup,
 };
-#endif
 
 static struct twl4030_madc_platform_data encore_madc_data = {
 	.irq_line	= 1,
@@ -279,15 +401,72 @@ static struct twl4030_platform_data __refdata encore_twldata = {
 	/* platform_data for children goes here */
 	.madc		= &encore_madc_data,
 	.usb		= &encore_usb_data,
-//	.gpio		= &encore_gpio_data,
+	.gpio		= &encore_gpio_data,
 	.keypad		= &encore_kp_twl4030_data,
+	.vmmc1		= &encore_vmmc1,
+	.vdac		= &encore_vdac,
 //	.power		= &encore_t2scripts_data,
+};
+
+
+static struct i2c_board_info __initdata encore_i2c_bus1_info[] = {
+#ifdef CONFIG_BATTERY_MAX17042
+	{
+		I2C_BOARD_INFO(MAX17042_DEVICE_ID, MAX17042_I2C_SLAVE_ADDRESS),
+		.platform_data = &max17042_platform_data_here,
+		.irq = OMAP_GPIO_IRQ(MAX17042_GPIO_FOR_IRQ),
+	},
+#endif	/*CONFIG_BATTERY_MAX17042*/	
+	{
+		I2C_BOARD_INFO("tps65921", 0x48),
+		.flags = I2C_CLIENT_WAKE,
+		.irq = INT_34XX_SYS_NIRQ,
+		.platform_data = &encore_twldata,
+	},
+#ifdef CONFIG_INPUT_KXTF9
+	{
+		I2C_BOARD_INFO(KXTF9_DEVICE_ID, KXTF9_I2C_SLAVE_ADDRESS),
+		.platform_data = &kxtf9_platform_data_here,
+		.irq = OMAP_GPIO_IRQ(KXTF9_GPIO_FOR_IRQ),
+	},
+#endif /* CONFIG_INPUT_KXTF9 */
+#ifdef CONFIG_MAX9635
+    {
+        I2C_BOARD_INFO(MAX9635_NAME, MAX9635_I2C_SLAVE_ADDRESS),
+        .platform_data = &max9635_platform_data,
+        .irq = OMAP_GPIO_IRQ(MAX9635_GPIO_FOR_IRQ),
+    },
+#endif /* CONFIG_MAX9635 */
+};
+
+static struct i2c_board_info __initdata encore_i2c_bus2_info[] = {
+#ifdef CONFIG_TOUCHSCREEN_PIXCIR_I2C 
+	{
+		I2C_BOARD_INFO(PIXCIR_I2C_S32_NAME, PIXCIR_I2C_S32_SLAVEADDRESS),
+		.platform_data = &pixcir_platform_data,
+		.irq = OMAP_GPIO_IRQ(PIXCIR_I2C_S32_GPIO),
+	},
+#endif
+#ifdef CONFIG_TOUCHSCREEN_CYTTSP_I2C
+	{
+        I2C_BOARD_INFO(CY_I2C_NAME, CYTTSP_I2C_SLAVEADDRESS),
+        .platform_data = &cyttsp_platform_data,
+        .irq = OMAP_GPIO_IRQ(OMAP_CYTTSP_GPIO),
+	},
+#endif
+
+#if defined(CONFIG_SND_SOC_DAC3100) || defined(CONFIG_SND_SOC_DAC3100_MODULE)  || defined (CONFIG_SND_OMAP_SOC_OMAP3_EDP)
+	{
+		I2C_BOARD_INFO(AIC3100_NAME,  AIC3100_I2CSLAVEADDRESS),
+                .irq = OMAP_GPIO_IRQ(AUDIO_CODEC_IRQ_GPIO),
+	},
+#endif
 };
 
 
 static struct omap_musb_board_data musb_board_data = {
 	.interface_type		= MUSB_INTERFACE_ULPI,
-	.mode			= MUSB_OTG,
+	.mode			= MUSB_PERIPHERAL,
 	.power			= 100,
 };
 
@@ -328,97 +507,6 @@ static struct omap_uart_port_info omap_serial_platform_data[] = {
 		.flags		= 0
 	}
 };
-
-#if defined(CONFIG_USB_ANDROID) || defined(CONFIG_USB_ANDROID_MODULE)
-static struct usb_mass_storage_platform_data mass_storage_pdata = {
-	.vendor = "B&N     ",
-	.product = "Ebook Disk      ",
-	.release = 0x0100,
-};
-
-static struct platform_device usb_mass_storage_device = {
-	.name = "usb_mass_storage",
-	.id = -1,
-	.dev = {
-		.platform_data = &mass_storage_pdata,
-		},
-};
-
-// Reserved for serial number passed in from the bootloader.
-static char adb_serial_number[32] = "";
-
-static char *usb_functions_ums[] = {
-	"usb_mass_storage",
-};
-
-static char *usb_functions_ums_adb[] = {
-	"usb_mass_storage",
-	"adb",
-};
-
-static char *usb_functions_rndis[] = {
-	"rndis",
-};
-
-static char *usb_functions_rndis_adb[] = {
-	"rndis",
-	"adb",
-};
-
-static char *usb_functions_all[] = {
-#ifdef CONFIG_USB_ANDROID_RNDIS
-	"rndis",
-#endif
-	"usb_mass_storage",
-	"adb",
-#ifdef CONFIG_USB_ANDROID_ACM
-	"acm",
-#endif
-};
-
-static struct android_usb_product usb_products[] = {
-	{
-		.product_id	= ENCORE_PRODUCT_ID,
-		.num_functions	= ARRAY_SIZE(usb_functions_ums),
-		.functions	= usb_functions_ums,
-	},
-	{
-		.product_id	= ENCORE_ADB_PRODUCT_ID,
-		.num_functions	= ARRAY_SIZE(usb_functions_ums_adb),
-		.functions	= usb_functions_ums_adb,
-	},
-	{
-		.product_id	= ENCORE_RNDIS_PRODUCT_ID,
-		.num_functions	= ARRAY_SIZE(usb_functions_rndis),
-		.functions	= usb_functions_rndis,
-	},
-	{
-		.product_id	= ENCORE_RNDIS_ADB_PRODUCT_ID,
-		.num_functions	= ARRAY_SIZE(usb_functions_rndis_adb),
-		.functions	= usb_functions_rndis_adb,
-	},
-};
-
-static struct android_usb_platform_data android_usb_pdata = {
-	.vendor_id	= ENCORE_VENDOR_ID,
-	.product_id	= ENCORE_PRODUCT_ID,
-	.manufacturer_name = "B&N",
-	.product_name	= "NookColor",
-	.serial_number	= "11223344556677",
-	.num_products   = ARRAY_SIZE(usb_products),
-	.products	= usb_products,
-	.num_functions	= ARRAY_SIZE(usb_functions_all),
-	.functions	= usb_functions_all,
-};
-
-static struct platform_device android_usb_device = {
-	.name		= "android_usb",
-	.id		= -1,
-	.dev		= {
-		.platform_data = &android_usb_pdata,
-	},
-};
-#endif
 
 #ifdef CONFIG_OMAP_MUX
 static struct omap_board_mux board_mux[] __initdata = {
@@ -475,11 +563,51 @@ static struct omap_volt_pmic_info omap_pmic_core = {
 static struct omap_board_config_kernel encore_config[] __initdata = {
 };
 
+
+static int __init omap_i2c_init(void)
+{
+    int i2c1_devices;
+    printk("***********IN omap_i2c_init***********\n");
+
+/* Disable OMAP 3630 internal pull-ups for I2Ci */
+	if (cpu_is_omap3630()) {
+
+		u32 prog_io;
+
+		prog_io = omap_ctrl_readl(OMAP343X_CONTROL_PROG_IO1);
+		/* Program (bit 19)=1 to disable internal pull-up on I2C1 */
+		prog_io |= OMAP3630_PRG_I2C1_PULLUPRESX;
+		/* Program (bit 0)=1 to disable internal pull-up on I2C2 */
+		prog_io |= OMAP3630_PRG_I2C2_PULLUPRESX;
+		omap_ctrl_writel(prog_io, OMAP343X_CONTROL_PROG_IO1);
+
+		prog_io = omap_ctrl_readl(OMAP36XX_CONTROL_PROG_IO_WKUP1);
+		/* Program (bit 5)=1 to disable internal pull-up on I2C4(SR) */
+		prog_io |= OMAP3630_PRG_SR_PULLUPRESX;
+		omap_ctrl_writel(prog_io, OMAP36XX_CONTROL_PROG_IO_WKUP1);
+	}
+
+	i2c1_devices = ARRAY_SIZE(encore_i2c_bus1_info);
+
+#ifdef CONFIG_MAX9635
+	// right now evt2 is not stuffed with the max9635 light sensor due to i2c conflict 
+	// tbd if it will be reworked on specific units
+	--i2c1_devices;
+#endif
+    printk("****omap_i2c_init(): Number of devices on bus1: %i\n", i2c1_devices);
+	omap_register_i2c_bus(1, 100, NULL, encore_i2c_bus1_info,
+			i2c1_devices);
+	omap_register_i2c_bus(2, 400, NULL, encore_i2c_bus2_info,
+			ARRAY_SIZE(encore_i2c_bus2_info));
+	return 0;
+}
+
 static void __init omap_encore_init(void)
 {
 	platform_device_register(&encore_ram_console_device);
 
 	omap3_mux_init(board_mux, OMAP_PACKAGE_CBB);
+	omap_i2c_init();
 	omap_serial_init(omap_serial_platform_data);
 	usb_musb_init(&musb_board_data);
 
@@ -493,17 +621,6 @@ static void __init omap_encore_init(void)
 #endif
 #endif
 
-
-#if defined(CONFIG_USB_ANDROID) || defined(CONFIG_USB_ANDROID_MODULE)
-	platform_device_register(&usb_mass_storage_device);
-	// Set the device serial number passed in from the bootloader.
-	if (system_serial_high != 0 || system_serial_low != 0) {
-		snprintf(adb_serial_number, sizeof(adb_serial_number), "%08x%08x", system_serial_high, system_serial_low);
-		adb_serial_number[16] = '\0';
-		android_usb_pdata.serial_number = adb_serial_number;
-	}
-	platform_device_register(&android_usb_device);
-#endif
         BUG_ON(!cpu_is_omap3630());
 }
 
