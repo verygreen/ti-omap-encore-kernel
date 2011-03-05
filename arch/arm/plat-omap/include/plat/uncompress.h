@@ -152,6 +152,7 @@ static inline void __arch_decomp_setup(unsigned long arch_id)
 		/* zoom2/3 external uart */
 		DEBUG_LL_ZOOM(omap_zoom2);
 		DEBUG_LL_ZOOM(omap_zoom3);
+		DEBUG_LL_OMAP3(3, encore);
 
 	} while (0);
 }

@@ -70,6 +70,11 @@ config MACH_OMAP_LDP
 	depends on ARCH_OMAP3
 	select OMAP_PACKAGE_CBB
 
+config MACH_ENCORE
+        bool "Barnes & Noble Encore (Nook Color)"
+        depends on ARCH_OMAP3
+        select OMAP_PACKAGE_CBP
+
 config MACH_OVERO
 	bool "Gumstix Overo board"
 	depends on ARCH_OMAP3
