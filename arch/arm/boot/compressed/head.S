@@ -71,6 +71,24 @@ wait:		mrc	p14, 0, pc, c0, c1, 0
 		mov	\rb, #0x50000000
 		add	\rb, \rb, #0x4000 * CONFIG_S3C_LOWLEVEL_UART_PORT
 		.endm
+#elif defined(CONFIG_ARCH_OMAP2PLUS)
+#include <plat/multi.h>
+#ifdef MULTI_OMAP2
+#error Low-level uncompress debug code won't work with multi-omap
+#elif defined(CONFIG_ARCH_OMAP2)
+		.macro loadsp, rb, tmp
+		ldr     \rb, =OMAP2_UART3_BASE  /* patch accordingly */
+		.endm
+#elif defined(CONFIG_ARCH_OMAP3)
+		.macro loadsp, rb, tmp
+		ldr     \rb, =OMAP3_UART3_BASE  /* patch accordingly */
+		.endm
+#elif defined(CONFIG_ARCH_OMAP4)
+		.macro loadsp, rb, tmp
+		ldr     \rb, =OMAP4_UART3_BASE  /* patch accordingly */
+		.endm
+#endif
+
 #else
 		.macro	loadsp,	rb, tmp
 		addruart \rb, \tmp
