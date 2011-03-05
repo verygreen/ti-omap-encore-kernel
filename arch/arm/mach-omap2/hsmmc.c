@@ -38,7 +38,7 @@ static struct hsmmc_controller {
 	char				name[HSMMC_NAME_LEN + 1];
 } hsmmc[OMAP44XX_NR_MMC];
 
-#if defined(CONFIG_ARCH_OMAP3) || defined(CONFIG_ARCH_OMAP4) && defined(CONFIG_PM)
+#if (defined(CONFIG_ARCH_OMAP3) || defined(CONFIG_ARCH_OMAP4)) && defined(CONFIG_PM)
 
 static int hsmmc_get_context_loss(struct device *dev)
 {
