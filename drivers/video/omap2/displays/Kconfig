@@ -65,4 +65,19 @@ config PANEL_ACX565AKM
 	select BACKLIGHT_CLASS_DEVICE
 	help
 	  This is the LCD panel used on Nokia N900
+
+config PANEL_BOXER
+	tristate "TI Boxer Panel (B&N Nook)"
+	help
+	  LCD Panel used in the TI Boxer and B&N Nook
+
+config PANEL_BOXER_CPT
+	bool "Boxer board with CPT panel"
+	default y
+	help
+	  Select if you have the boxer board
+	  with CPT panel mounted. For Samsung
+	  set to N.
+	depends on PANEL_BOXER
+
 endmenu
