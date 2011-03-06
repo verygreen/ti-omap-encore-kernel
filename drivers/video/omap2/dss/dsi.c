@@ -33,6 +33,7 @@
 #include <linux/regulator/consumer.h>
 #include <linux/wait.h>
 #include <linux/workqueue.h>
+#include <linux/i2c/twl.h>
 
 #include <plat/display.h>
 #include <plat/clock.h>
@@ -1319,7 +1320,7 @@ int dsi_pll_init(struct omap_dss_device *dssdev, bool enable_hsclk,
 	enable_clocks(1);
 	dsi_enable_pll_clock(ix, 1);
 
-	if (!cpu_is_omap44xx()) {
+	if (!cpu_is_omap44xx() && !twl_rev_is_tps65921()) {
 		r = regulator_enable(dsi1.vdds_dsi_reg);
 		if (r)
 			goto err0;
@@ -1357,7 +1358,7 @@ int dsi_pll_init(struct omap_dss_device *dssdev, bool enable_hsclk,
 
 	return 0;
 err1:
-	if (!cpu_is_omap44xx())
+	if (!cpu_is_omap44xx() && !twl_rev_is_tps65921())
 		regulator_disable(dsi1.vdds_dsi_reg);
 err0:
 	enable_clocks(0);
@@ -1375,7 +1376,7 @@ void dsi_pll_uninit(enum omap_dsi_index ix)
 
 	p_dsi->pll_locked = 0;
 	dsi_pll_power(ix, DSI_PLL_POWER_OFF);
-	if (!cpu_is_omap44xx())
+	if (!cpu_is_omap44xx() && !twl_rev_is_tps65921())
 		regulator_disable(dsi1.vdds_dsi_reg);
 	DSSDBG("PLL uninit done\n");
 }
@@ -4060,7 +4061,9 @@ int dsi_init(struct platform_device *pdev)
 		goto err1;
 	}
 
-	if (!cpu_is_omap44xx()) {
+	if (twl_rev_is_tps65921()) {
+		/* VDD_DSI is tied directly to VIO */
+	} else if (!cpu_is_omap44xx()) {
 		dsi1.vdds_dsi_reg = dss_get_vdds_dsi();
 		if (IS_ERR(dsi1.vdds_dsi_reg)) {
 			iounmap(dsi1.base);
