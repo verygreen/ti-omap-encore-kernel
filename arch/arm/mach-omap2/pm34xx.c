@@ -22,6 +22,7 @@
 #include <linux/suspend.h>
 #include <linux/interrupt.h>
 #include <linux/module.h>
+#include <linux/bootmem.h>
 #include <linux/list.h>
 #include <linux/err.h>
 #include <linux/gpio.h>
@@ -1113,24 +1114,6 @@ static int __init omap3_pm_init(void)
 	omap3_idle_init();
 
 	clkdm_add_wkdep(neon_clkdm, mpu_clkdm);
-	if (omap_type() != OMAP2_DEVICE_TYPE_GP) {
-		omap3_secure_ram_storage =
-			kmalloc(secure_copy_data.size, GFP_KERNEL);
-		if (!omap3_secure_ram_storage)
-			printk(KERN_ERR "Memory allocation failed when"
-					"allocating for secure sram context\n");
-
-		local_irq_disable();
-		local_fiq_disable();
-
-		omap2_dma_context_save();
-		omap3_save_secure_ram_context(PWRDM_POWER_ON);
-		omap2_dma_context_restore();
-
-		local_irq_enable();
-		local_fiq_enable();
-	}
-
 	omap3_save_scratchpad_contents();
 err1:
 	return ret;
@@ -1144,3 +1127,13 @@ err2:
 }
 
 late_initcall(omap3_pm_init);
+
+void __init pm_alloc_secure_ram(void)
+{
+	if (omap_type() != OMAP2_DEVICE_TYPE_GP) {
+		omap3_secure_ram_storage =
+			alloc_bootmem_low_pages(secure_copy_data.size);
+		if (!omap3_secure_ram_storage)
+			pr_err("Memory alloc failed for secure RAM context.\n");
+	}
+}

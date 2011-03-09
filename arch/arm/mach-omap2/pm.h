@@ -48,6 +48,11 @@ static inline u32 omap4_device_off_read_next_state(void)
 }
 #endif
 extern int omap3_idle_init(void);
+#if defined(CONFIG_PM) && defined(CONFIG_ARCH_OMAP3)
+extern void pm_alloc_secure_ram(void);
+#else
+static inline void pm_alloc_secure_ram(void) { }
+#endif
 extern int omap4_idle_init(void);
 extern int omap4_can_sleep(void);
 extern void omap4_enter_sleep(unsigned int cpu, unsigned int power_state);
