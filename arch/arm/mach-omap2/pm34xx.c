@@ -434,6 +434,8 @@ void omap_sram_idle(void)
 			omap3_prcm_save_context();
 			/* Save MUSB context */
 			musb_context_save_restore(save_context);
+			if (omap_type() != OMAP2_DEVICE_TYPE_GP)
+				omap3_save_secure_ram_context(mpu_next_state);
 		} else {
 			musb_context_save_restore(disable_clk);
 		}
