@@ -21,6 +21,10 @@
 #include <linux/err.h>
 #include <linux/clk.h>
 
+#ifdef CONFIG_TOUCHSCREEN_CYTTSP_I2C
+#include <linux/cyttsp.h>
+#endif
+
 #ifdef CONFIG_INPUT_KXTF9
 #include <linux/kxtf9.h>
 #endif /* CONFIG_INPUT_KXTF9 */
@@ -273,6 +277,65 @@ struct max17042_platform_data max17042_platform_data_here = {
 };
 #endif
 
+#ifdef CONFIG_TOUCHSCREEN_CYTTSP_I2C
+
+int  cyttsp_dev_init(int resource) 
+{
+	if (resource)
+	{
+		if (gpio_request(OMAP_CYTTSP_RESET_GPIO, "tma340_reset") < 0) {
+			printk(KERN_ERR "can't get tma340 xreset GPIO\n");
+			return -1;
+		}
+
+		if (gpio_request(OMAP_CYTTSP_GPIO, "cyttsp_touch") < 0) {
+			printk(KERN_ERR "can't get cyttsp interrupt GPIO\n");
+			return -1;
+		}
+
+		gpio_direction_input(OMAP_CYTTSP_GPIO);
+		gpio_set_debounce(OMAP_CYTTSP_GPIO, 0);
+	}
+	else
+	{
+		gpio_free(OMAP_CYTTSP_GPIO);
+		gpio_free(OMAP_CYTTSP_RESET_GPIO);
+	}
+    return 0;
+}
+
+static struct cyttsp_platform_data cyttsp_platform_data = {
+	.maxx = 600,
+	.maxy = 1024,
+	.flags = 0,
+	.gen = CY_GEN3,
+	.use_st = CY_USE_ST,
+	.use_mt = CY_USE_MT,
+	.use_hndshk = CY_SEND_HNDSHK,
+	.use_trk_id = CY_USE_TRACKING_ID,
+	.use_sleep = CY_USE_SLEEP,
+	.use_gestures = CY_USE_GESTURES,
+	/* activate up to 4 groups
+	 * and set active distance
+	 */
+	.gest_set = CY_GEST_GRP1 | CY_GEST_GRP2 |
+		CY_GEST_GRP3 | CY_GEST_GRP4 |
+		CY_ACT_DIST,
+	/* change act_intrvl to customize the Active power state 
+	 * scanning/processing refresh interval for Operating mode
+	 */
+	.act_intrvl = CY_ACT_INTRVL_DFLT,
+	/* change tch_tmout to customize the touch timeout for the
+	 * Active power state for Operating mode
+	 */
+	.tch_tmout = CY_TCH_TMOUT_DFLT,
+	/* change lp_intrvl to customize the Low Power power state 
+	 * scanning/processing refresh interval for Operating mode
+	 */
+	.lp_intrvl = CY_LP_INTRVL_DFLT,
+};
+
+#endif
 
 static struct twl4030_usb_data encore_usb_data = {
       .usb_mode	= T2_USB_MODE_ULPI,
@@ -547,7 +610,6 @@ static struct twl4030_platform_data __refdata encore_twldata = {
 	.vpll2		= &encore_vdsi,
 //	.power		= &encore_t2scripts_data,
 };
-
 
 static struct i2c_board_info __initdata encore_i2c_bus1_info[] = {
 #ifdef CONFIG_BATTERY_MAX17042
