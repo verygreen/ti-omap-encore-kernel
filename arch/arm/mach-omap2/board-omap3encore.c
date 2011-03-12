@@ -62,6 +62,7 @@
 #include <plat/sram.h>
 
 #include <plat/display.h>
+#include <plat/mmc.h>
 #include <plat/omap-serial.h>
 
 #include <plat/opp_twl_tps.h>
@@ -442,6 +443,7 @@ static struct omap2_hsmmc_info mmc[] __initdata = {
 		.gpio_wp	= -EINVAL,
 		.power_saving	= true,
 	},
+
 	{
 		.name		= "internal",
 		.mmc		= 2,
@@ -463,9 +465,46 @@ static struct omap2_hsmmc_info mmc[] __initdata = {
 	{}      /* Terminator */
 };
 
+static int encore_hsmmc_card_detect(struct device *dev, int slot)
+{
+	struct omap_mmc_platform_data *mmc = dev->platform_data;
+
+	/* Encore board EVT2 and later has pin high when card is present) */
+	return gpio_get_value_cansleep(mmc->slots[0].switch_pin);
+}
+
+static int encore_twl4030_hsmmc_late_init(struct device *dev)
+{
+        int ret = 0;
+        struct platform_device *pdev = container_of(dev,
+                                struct platform_device, dev);
+        struct omap_mmc_platform_data *pdata = dev->platform_data;
+
+	if(is_encore_board_evt2()) {
+		/* Setting MMC1 (external) Card detect */
+		if (pdev->id == 0) {
+			pdata->slots[0].card_detect = encore_hsmmc_card_detect;
+		}
+	}
+        return ret;
+}
+
+static __init void encore_hsmmc_set_late_init(struct device *dev)
+{
+	struct omap_mmc_platform_data *pdata;
+
+	/* dev can be null if CONFIG_MMC_OMAP_HS is not set */
+	if (!dev)
+		return;
+
+	pdata = dev->platform_data;
+	pdata->init = encore_twl4030_hsmmc_late_init;
+}
+
 static int __ref encore_twl_gpio_setup(struct device *dev,
 		unsigned gpio, unsigned ngpio)
 {
+	struct omap2_hsmmc_info *c;
 	/* gpio + 0 is "mmc0_cd" (input/IRQ),
 	 * gpio + 1 is "mmc1_cd" (input/IRQ)
 	 */
@@ -473,6 +512,8 @@ printk("******IN boxer_twl_gpio_setup********\n");
 	mmc[0].gpio_cd = gpio + 0;
 	mmc[1].gpio_cd = gpio + 1;
 	omap2_hsmmc_init(mmc);
+	for (c = mmc; c->mmc; c++)
+                encore_hsmmc_set_late_init(c->dev);
 
 	/* link regulators to MMC adapters ... we "know" the
 	 * regulators will be set up only *after* we return.
