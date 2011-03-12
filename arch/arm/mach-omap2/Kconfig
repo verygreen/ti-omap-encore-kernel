@@ -74,6 +74,7 @@ config MACH_ENCORE
         bool "Barnes & Noble Encore (Nook Color)"
         depends on ARCH_OMAP3
         select OMAP_PACKAGE_CBP
+	select WLAN_POWER_EVT1
 
 config MACH_OVERO
 	bool "Gumstix Overo board"
@@ -110,6 +111,13 @@ config TIWLAN_MMC_CONTROLLER
           Choose the number of the MMC controller that TI WLAN chip is
           connected to. TI WLAN has SDIO host controller that will control
           this MMC port.
+
+config WLAN_POWER_EVT1
+        bool "WLAN power support"
+        depends on MACH_ENCORE && TIWLAN_SDIO
+        default "y"
+        help
+          Has to be set for B&N Encore board.
 
 config MACH_OMAP3517EVM
 	bool "OMAP3517/ AM3517 EVM board"

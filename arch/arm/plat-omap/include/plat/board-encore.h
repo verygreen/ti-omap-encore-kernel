@@ -55,6 +55,10 @@ extern unsigned get_last_off_on_transaction_id(struct device *dev);
 #define MAX8903_GPIO_CHG_ILM     61
 #endif
 
+#define BOXER_WIFI_PMENA_GPIO   22
+#define BOXER_WIFI_IRQ_GPIO     15
+#define BOXER_WIFI_EN_POW       16
+
 #define BOARD_ENCORE_REV_EVT1A      0x1
 #define BOARD_ENCORE_REV_EVT1B      0x2
 #define BOARD_ENCORE_REV_EVT2       0x3
