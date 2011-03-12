@@ -21,6 +21,10 @@
 #include <linux/err.h>
 #include <linux/clk.h>
 
+#ifdef CONFIG_BATTERY_MAX17042
+#include <linux/max17042.h>
+#endif
+
 #include <linux/spi/spi.h>
 #include <linux/i2c/twl.h>
 #include <linux/interrupt.h>
@@ -34,6 +38,7 @@
 #include <asm/mach/map.h>
 #include <linux/mmc/host.h>
 
+#include <plat/board-encore.h>
 #include <plat/mcspi.h>
 #include <mach/gpio.h>
 #include <plat/board.h>
@@ -152,11 +157,51 @@ static void __init omap_encore_init_irq(void)
 	omap_init_irq();
 }
 
+#ifdef CONFIG_CHARGER_MAX8903
+static struct platform_device max8903_charger_device = {
+	.name		= "max8903_charger",
+	.id		= -1,
+};
+#endif
+
+#ifdef CONFIG_BATTERY_MAX17042
+static void max17042_dev_init(void)
+{
+        printk("board-encore.c: max17042_dev_init ...\n");
+
+        if (gpio_request(MAX17042_GPIO_FOR_IRQ, "max17042_irq") < 0) {
+                printk(KERN_ERR "Can't get GPIO for max17042 IRQ\n");
+                return;
+        }
+
+        printk("board-encore.c: max17042_dev_init > Init max17042 irq pin %d !\n", MAX17042_GPIO_FOR_IRQ);
+        gpio_direction_input(MAX17042_GPIO_FOR_IRQ);
+        gpio_set_debounce(MAX17042_GPIO_FOR_IRQ, 0);        
+        printk("max17042 GPIO pin read %d\n", gpio_get_value(MAX17042_GPIO_FOR_IRQ));
+}
+
+struct max17042_platform_data max17042_platform_data_here = {
+
+	//fill in device specific data here
+	//load stored parameters from Rom Tokens? 
+	//.val_FullCAP =
+	//.val_Cycles =
+	//.val_FullCAPNom =
+	//.val_SOCempty =
+	//.val_Iavg_empty =
+	//.val_RCOMP0 =
+	//.val_TempCo=
+	//.val_k_empty0 =
+	//.val_dQacc =
+	//.val_dPacc =
+	
+        .gpio = MAX17042_GPIO_FOR_IRQ,
+};
+#endif
+
+
 static struct twl4030_usb_data encore_usb_data = {
       .usb_mode	= T2_USB_MODE_ULPI,
-#ifdef CONFIG_REGULATOR_MAXIM_CHARGER
-      .bci_supply     = &bq24073_vcharge_supply,
-#endif
 };
 
 static struct regulator_consumer_supply encore_vmmc1_supply[] = {
@@ -864,6 +909,9 @@ static struct platform_device *encore_devices[] __initdata = {
 	&encore_ram_console_device,
 	&boxer_lcd_touch_regulator_device,
 	&encore_keys_gpio,
+#ifdef CONFIG_CHARGER_MAX8903
+	&max8903_charger_device,
+#endif
 };
 
 static void __init omap_encore_init(void)
@@ -885,6 +933,10 @@ static void __init omap_encore_init(void)
         omap_voltage_register_pmic(&omap_pmic_core, "core");
         omap_voltage_register_pmic(&omap_pmic_mpu, "mpu");
 #endif
+#endif
+
+#ifdef CONFIG_BATTERY_MAX17042
+        max17042_dev_init();
 #endif
 
         BUG_ON(!cpu_is_omap3630());
