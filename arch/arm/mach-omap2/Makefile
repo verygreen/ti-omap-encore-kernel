@@ -200,8 +200,11 @@ obj-$(CONFIG_MACH_OMAP4_PANDA)		+= board-omap4panda.o \
 ifeq ($(CONFIG_ARCH_OMAP4),y)
 obj-$(CONFIG_TIWLAN_SDIO)		+= board-4430sdp-wifi.o
 endif
-ifeq ($(CONFIG_ARCH_OMAP3),y)
+ifeq ($(CONFIG_MACH_OMAP_ZOOM2),y)
 obj-$(CONFIG_TIWLAN_SDIO)		+= board-zoom2-wifi.o
+endif
+ifeq ($(CONFIG_MACH_ENCORE),y)
+obj-$(CONFIG_TIWLAN_SDIO)		+= board-boxer-wifi.o
 endif
 
 obj-$(CONFIG_MACH_OMAP3517EVM)		+= board-am3517evm.o
