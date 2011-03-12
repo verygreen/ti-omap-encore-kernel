@@ -433,17 +433,9 @@ static struct regulator_init_data encore_vdsi = {
 	.consumer_supplies      = &encore_vdds_dsi_supply,
 };
 
-
+/* The order is reverted in this table so that internal eMMC is presented
+ * as first mmc card for compatibility with existing android installations */
 static struct omap2_hsmmc_info mmc[] __initdata = {
-	{
-		.name		= "external",
-		.mmc		= 1,
-		.caps		= MMC_CAP_4_BIT_DATA,
-		.gpio_cd	= -EINVAL,
-		.gpio_wp	= -EINVAL,
-		.power_saving	= true,
-	},
-
 	{
 		.name		= "internal",
 		.mmc		= 2,
@@ -451,6 +443,14 @@ static struct omap2_hsmmc_info mmc[] __initdata = {
 		.gpio_cd	= -EINVAL,
 		.gpio_wp	= -EINVAL,
 		.nonremovable	= true,
+		.power_saving	= true,
+	},
+	{
+		.name		= "external",
+		.mmc		= 1,
+		.caps		= MMC_CAP_4_BIT_DATA,
+		.gpio_cd	= -EINVAL,
+		.gpio_wp	= -EINVAL,
 		.power_saving	= true,
 	},
 	{
@@ -509,8 +509,8 @@ static int __ref encore_twl_gpio_setup(struct device *dev,
 	 * gpio + 1 is "mmc1_cd" (input/IRQ)
 	 */
 printk("******IN boxer_twl_gpio_setup********\n");
-	mmc[0].gpio_cd = gpio + 0;
-	mmc[1].gpio_cd = gpio + 1;
+	mmc[1].gpio_cd = gpio + 0;
+	mmc[0].gpio_cd = gpio + 1;
 	omap2_hsmmc_init(mmc);
 	for (c = mmc; c->mmc; c++)
                 encore_hsmmc_set_late_init(c->dev);
@@ -518,9 +518,9 @@ printk("******IN boxer_twl_gpio_setup********\n");
 	/* link regulators to MMC adapters ... we "know" the
 	 * regulators will be set up only *after* we return.
 	*/
-	encore_vmmc1_supply.dev = mmc[0].dev;
-	encore_vsim_supply.dev = mmc[0].dev;
-	encore_vmmc2_supply.dev = mmc[1].dev;
+	encore_vmmc1_supply.dev = mmc[1].dev;
+	encore_vsim_supply.dev = mmc[1].dev;
+	encore_vmmc2_supply.dev = mmc[0].dev;
 
 	return 0;
 }
