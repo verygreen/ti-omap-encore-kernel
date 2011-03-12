@@ -72,4 +72,9 @@ static inline int is_encore_board_evt1b(void)
     return (system_rev == BOARD_ENCORE_REV_EVT1B);
 }
 
+#define KXTF9_DEVICE_ID			"kxtf9"
+#define KXTF9_I2C_SLAVE_ADDRESS		0x0F
+#define KXTF9_GPIO_FOR_PWR		34
+#define KXTF9_GPIO_FOR_IRQ		113
+
 #endif /* __ASM_ARCH_OMAP_BOXER_H */
