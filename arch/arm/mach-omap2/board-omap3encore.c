@@ -66,8 +66,6 @@
 
 #include <plat/opp_twl_tps.h>
 
-#include <linux/usb/android_composite.h>
-
 #include <plat/system.h>
 
 #include "mux.h"
