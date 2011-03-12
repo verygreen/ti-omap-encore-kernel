@@ -77,4 +77,9 @@ static inline int is_encore_board_evt1b(void)
 #define KXTF9_GPIO_FOR_PWR		34
 #define KXTF9_GPIO_FOR_IRQ		113
 
+#define CYTTSP_I2C_SLAVEADDRESS 34
+#define OMAP_CYTTSP_GPIO        99
+#define OMAP_CYTTSP_RESET_GPIO 46
+
+
 #endif /* __ASM_ARCH_OMAP_BOXER_H */
