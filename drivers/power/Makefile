@@ -36,3 +36,5 @@ obj-$(CONFIG_BATTERY_Z2)	+= z2_battery.o
 obj-$(CONFIG_CHARGER_PCF50633)	+= pcf50633-charger.o
 obj-$(CONFIG_TWL6030_BCI_BATTERY)	+= twl6030_bci_battery.o
 obj-$(CONFIG_CHARGER_BQ2415x)	+= bq2415x_charger.o
+obj-$(CONFIG_BATTERY_MAX17042)	+= max17042_battery.o
+obj-$(CONFIG_CHARGER_MAX8903)	+= max8903_charger.o
