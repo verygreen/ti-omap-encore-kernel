@@ -186,7 +186,6 @@ static void kxtf9_dev_init(void)
 
 	printk("board-encore.c: kxtf9_dev_init > Init kxtf9 irq pin %d !\n", KXTF9_GPIO_FOR_IRQ);
 	gpio_direction_input(KXTF9_GPIO_FOR_IRQ);
-	gpio_set_debounce(KXTF9_GPIO_FOR_IRQ, 0);
 }
 
 struct kxtf9_platform_data kxtf9_platform_data_here = {
@@ -253,7 +252,6 @@ static void max17042_dev_init(void)
 
         printk("board-encore.c: max17042_dev_init > Init max17042 irq pin %d !\n", MAX17042_GPIO_FOR_IRQ);
         gpio_direction_input(MAX17042_GPIO_FOR_IRQ);
-        gpio_set_debounce(MAX17042_GPIO_FOR_IRQ, 0);        
         printk("max17042 GPIO pin read %d\n", gpio_get_value(MAX17042_GPIO_FOR_IRQ));
 }
 
@@ -293,7 +291,6 @@ int  cyttsp_dev_init(int resource)
 		}
 
 		gpio_direction_input(OMAP_CYTTSP_GPIO);
-		gpio_set_debounce(OMAP_CYTTSP_GPIO, 0);
 	}
 	else
 	{
@@ -1052,6 +1049,7 @@ static struct platform_device *encore_devices[] __initdata = {
 static void __init omap_encore_init(void)
 {
 	omap3_mux_init(board_mux, OMAP_PACKAGE_CBB);
+	omap_mux_init_gpio(OMAP_CYTTSP_GPIO, OMAP_PIN_INPUT);
 	omap_i2c_init();
 
 	platform_add_devices(encore_devices, ARRAY_SIZE(encore_devices));
