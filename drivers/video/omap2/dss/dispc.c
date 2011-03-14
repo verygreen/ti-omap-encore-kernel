@@ -3021,7 +3021,21 @@ static int _dispc_setup_plane(enum omap_plane plane,
 	if (ilace != PBUF_PDEV) {
 #ifdef CONFIG_OMAP2_DSS_HDMI
 		/* HDMI output */
-		height /= 2;
+		switch (rotation) {
+		case OMAP_DSS_ROT_0:
+		case OMAP_DSS_ROT_180:
+			height /= 2;
+			break;
+		case OMAP_DSS_ROT_90:
+		case OMAP_DSS_ROT_270:
+			/* rotation not considered for interlace devices */
+			if (ilace == PBUF_IDEV || ilace == IBUF_IDEV)
+				return -EINVAL;
+			width = width/2;
+			break;
+		default:
+			return -EINVAL;
+		}
 #else
 		/* VENC output */
 		if (fieldmode)
@@ -3124,6 +3138,9 @@ static int _dispc_setup_plane(enum omap_plane plane,
 	/* default values */
 	row_inc = pix_inc = 0x1;
 	offset0 = offset1 = 0x0;
+
+	/* Reset the Tiler burst bit */
+	REG_FLD_MOD(dispc_reg_att[plane], 0x0, 29, 29); /*BURSTTYPE */
 
 	if (rotation_type == OMAP_DSS_ROT_TILER) {
 #ifdef CONFIG_TILER_OMAP
@@ -4970,8 +4987,10 @@ static void _omap_dispc_initial_config(void)
 	dispc_read_plane_fifo_sizes();
 
 	/* Enabling the DISPC_DIVISOR and setting the LCD to 1 */
-	REG_FLD_MOD(DISPC_DIVISOR1, 1, 0, 0);
-	REG_FLD_MOD(DISPC_DIVISOR1, 1, 23, 16);
+	if (cpu_is_omap44xx()) {
+		REG_FLD_MOD(DISPC_DIVISOR1, 1, 0, 0);
+		REG_FLD_MOD(DISPC_DIVISOR1, 1, 23, 16);
+	}
 }
 
 int dispc_init(struct platform_device *pdev)
