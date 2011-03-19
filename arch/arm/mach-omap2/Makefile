@@ -191,8 +191,7 @@ obj-$(CONFIG_MACH_IGEP0020)		+= board-igep0020.o \
 					   hsmmc.o
 obj-$(CONFIG_MACH_OMAP3_TOUCHBOOK)	+= board-omap3touchbook.o \
 					   hsmmc.o
-obj-$(CONFIG_MACH_OMAP_4430SDP)		+= board-4430sdp.o \
-					   hsmmc.o cdc_tcxo.o
+obj-$(CONFIG_MACH_OMAP_4430SDP)		+= board-4430sdp.o
 
 obj-$(CONFIG_MACH_OMAP4_PANDA)		+= board-omap4panda.o \
 					   hsmmc.o
@@ -226,3 +225,4 @@ smc91x-$(CONFIG_SMC91X)			:= gpmc-smc91x.o
 obj-y					+= $(smc91x-m) $(smc91x-y)
 obj-$(CONFIG_ARCH_OMAP4)		+= hwspinlocks.o
 obj-$(CONFIG_OMAP_HSI_DEVICE)           += omap_hsi.o
+obj-$(CONFIG_ARCH_OMAP3)		+= twl4030.o

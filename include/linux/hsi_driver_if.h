@@ -169,11 +169,12 @@ struct hsi_device_driver {
 int hsi_register_driver(struct hsi_device_driver *driver);
 void hsi_unregister_driver(struct hsi_device_driver *driver);
 int hsi_open(struct hsi_device *dev);
-int hsi_write(struct hsi_device *dev, u32 * addr, unsigned int size);
+int hsi_write(struct hsi_device *dev, u32 *addr, unsigned int size);
 void hsi_write_cancel(struct hsi_device *dev);
-int hsi_read(struct hsi_device *dev, u32 * addr, unsigned int size);
+int hsi_read(struct hsi_device *dev, u32 *addr, unsigned int size);
 void hsi_read_cancel(struct hsi_device *dev);
 int hsi_poll(struct hsi_device *dev);
+int hsi_unpoll(struct hsi_device *dev);
 int hsi_ioctl(struct hsi_device *dev, unsigned int command, void *arg);
 void hsi_close(struct hsi_device *dev);
 void hsi_set_read_cb(struct hsi_device *dev,

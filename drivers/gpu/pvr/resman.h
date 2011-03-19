@@ -1,6 +1,6 @@
 /**********************************************************************
  *
- * Copyright(c) 2008 Imagination Technologies Ltd. All rights reserved.
+ * Copyright (C) Imagination Technologies Ltd. All rights reserved.
  * 
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
@@ -39,6 +39,9 @@ enum {
 	RESMAN_TYPE_HW_TRANSFER_CONTEXT,				
 	RESMAN_TYPE_HW_2D_CONTEXT,						
 	RESMAN_TYPE_TRANSFER_CONTEXT,					
+
+	
+	RESMAN_TYPE_DMA_CLIENT_FIFO_DATA,				
 
 	
 	

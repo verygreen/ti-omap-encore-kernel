@@ -36,31 +36,29 @@ static unsigned char hsi_sync_table[2][2][8] = {
 };
 
 /**
- * hsi_get_free_lch - Get a free GDD(DMA)logical channel
- * @hsi_ctrl- HSI controller of the GDD.
+ * hsi_get_free_lch - Get a free GDD(DMA) logical channel
+ * @hsi_ctrl - HSI controller of the GDD.
  *
  * Needs to be called holding the hsi_controller lock
  *
- * Return a free logical channel number. If there is no free lch
- * then returns an out of range value
+ * Returns the logical channel number, or -EBUSY if none available
  */
-static unsigned int hsi_get_free_lch(struct hsi_dev *hsi_ctrl)
+static int hsi_get_free_lch(struct hsi_dev *hsi_ctrl)
 {
 	unsigned int enable_reg;
-	unsigned int i;
-	unsigned int lch = hsi_ctrl->last_gdd_lch;
+	int          i, lch;
 
 	enable_reg = hsi_inl(hsi_ctrl->base, HSI_SYS_GDD_MPU_IRQ_ENABLE_REG);
-	for (i = 1; i <= hsi_ctrl->gdd_chan_count; i++) {
-		lch = (lch + i) & (hsi_ctrl->gdd_chan_count - 1);
-		if (!(enable_reg & HSI_GDD_LCH(lch))) {
+	lch = hsi_ctrl->last_gdd_lch;
+	for (i = 0; i < hsi_ctrl->gdd_chan_count; i++) {
+		if (++lch >= hsi_ctrl->gdd_chan_count)
+			lch = 0;
+		if ((enable_reg & HSI_GDD_LCH(lch)) == 0) {
 			hsi_ctrl->last_gdd_lch = lch;
 			return lch;
 		}
 	}
-
-	lch = hsi_ctrl->gdd_chan_count;
-	return lch;
+	return -EBUSY;
 }
 
 /**
@@ -92,8 +90,8 @@ int hsi_driver_write_dma(struct hsi_channel *hsi_channel, u32 * data,
 		return -EINVAL;
 
 	lch = hsi_get_free_lch(hsi_ctrl);
-	if (lch >= hsi_ctrl->gdd_chan_count) {
-		dev_err(hsi_ctrl->dev, "No free GDD logical channels.\n");
+	if (lch < 0) {
+		dev_err(hsi_ctrl->dev, "No free DMA channels.\n");
 		return -EBUSY;	/* No free GDD logical channels. */
 	} else {
 		dev_dbg(hsi_ctrl->dev, "Allocated DMA channel %d for write on"
@@ -167,15 +165,15 @@ int hsi_driver_read_dma(struct hsi_channel *hsi_channel, u32 * data,
 	unsigned int port = hsi_channel->hsi_port->port_number;
 	unsigned int channel = hsi_channel->channel_number;
 	unsigned int sync;
-	unsigned int lch;
+	int lch;
 	dma_addr_t src_addr;
 	dma_addr_t dest_addr;
 	u16 tmp;
 	int fifo;
 
 	lch = hsi_get_free_lch(hsi_ctrl);
-	if (lch >= hsi_ctrl->gdd_chan_count) {
-		dev_err(hsi_ctrl->dev, "No free GDD logical channels.\n");
+	if (lch < 0) {
+		dev_err(hsi_ctrl->dev, "No free DMA channels.\n");
 		return -EBUSY;	/* No free GDD logical channels. */
 	} else {
 		dev_dbg(hsi_ctrl->dev, "Allocated DMA channel %d for read on"
@@ -186,7 +184,7 @@ int hsi_driver_read_dma(struct hsi_channel *hsi_channel, u32 * data,
 	/* When DMA is used for Rx, disable the Rx Interrupt.
 	 * (else DATAAVAILLABLE event would get triggered on first
 	 * received data word)
-	 * (By default, Rx interrupt is active for polling feature)
+	 * (Rx interrupt might be active for polling feature)
 	 */
 	hsi_driver_disable_read_interrupt(hsi_channel);
 
@@ -254,7 +252,7 @@ void hsi_driver_cancel_write_dma(struct hsi_channel *hsi_ch)
 
 	ccr = hsi_inw(hsi_ctrl->base, HSI_GDD_CCR_REG(lch));
 	if (!(ccr & HSI_CCR_ENABLE)) {
-		dev_dbg(&hsi_ch->dev->device, LOG_NAME "Write cancel on not "
+		dev_dbg(&hsi_ch->dev->device, "Write cancel on not "
 			"enabled logical channel %d CCR REG 0x%08X\n", lch,
 			ccr);
 		return;
@@ -278,22 +276,18 @@ void hsi_driver_cancel_read_dma(struct hsi_channel *hsi_ch)
 {
 	int lch = hsi_ch->read_data.lch;
 	struct hsi_dev *hsi_ctrl = hsi_ch->hsi_port->hsi_controller;
-	unsigned int port = hsi_ch->hsi_port->port_number;
-	unsigned int channel = hsi_ch->channel_number;
 	u32 reg;
-	long buff_offset;
 
 	if (lch < 0)
 		return;
 
-	/* DMA transfer is over, re-enable default mode
-	 * (Interrupts for polling feature)
-	 */
-	hsi_driver_enable_read_interrupt(hsi_ch, NULL);
+	/* Re-enable interrupts for polling if needed */
+	if (hsi_ch->flags & HSI_CH_RX_POLL)
+		hsi_driver_enable_read_interrupt(hsi_ch, NULL);
 
 	reg = hsi_inw(hsi_ctrl->base, HSI_GDD_CCR_REG(lch));
 	if (!(reg & HSI_CCR_ENABLE)) {
-		dev_dbg(&hsi_ch->dev->device, LOG_NAME "Read cancel on not "
+		dev_dbg(&hsi_ch->dev->device, "Read cancel on not "
 			"enable logical channel %d CCR REG 0x%08X\n", lch, reg);
 		return;
 	}
@@ -303,11 +297,6 @@ void hsi_driver_cancel_read_dma(struct hsi_channel *hsi_ch)
 		     HSI_SYS_GDD_MPU_IRQ_ENABLE_REG);
 	hsi_outl(HSI_GDD_LCH(lch), hsi_ctrl->base,
 		 HSI_SYS_GDD_MPU_IRQ_STATUS_REG);
-
-	buff_offset = hsi_hsr_bufstate_f_reg(hsi_ctrl, port, channel);
-	if (buff_offset >= 0)
-		hsi_outl_and(~HSI_BUFSTATE_CHANNEL(channel), hsi_ctrl->base,
-			     buff_offset);
 
 	hsi_reset_ch_read(hsi_ch);
 }
@@ -392,10 +381,10 @@ static void do_hsi_gdd_lch(struct hsi_dev *hsi_ctrl, unsigned int gdd_lch)
 					 DMA_FROM_DEVICE);
 			ch = hsi_ctrl_get_ch(hsi_ctrl, port, channel);
 			hsi_reset_ch_read(ch);
-			/* DMA transfer is over, re-enable default mode
-			 * (interrupts for polling feature)
-			 */
-			hsi_driver_enable_read_interrupt(ch, NULL);
+
+			/* Re-enable interrupts for polling if needed */
+			if (ch->flags & HSI_CH_RX_POLL)
+				hsi_driver_enable_read_interrupt(ch, NULL);
 
 			dev_dbg(hsi_ctrl->dev, "Calling read callback "
 						"(size %d).\n", size/4);

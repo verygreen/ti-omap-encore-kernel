@@ -58,6 +58,7 @@ bool hsi_is_channel_busy(struct hsi_channel *ch)
 bool hsi_is_hsi_port_busy(struct hsi_port *pport)
 {
 	struct hsi_dev *hsi_ctrl = pport->hsi_controller;
+	bool cur_cawake = hsi_get_cawake(pport);
 	int ch;
 
 	if (pport->in_int_tasklet) {
@@ -70,12 +71,10 @@ bool hsi_is_hsi_port_busy(struct hsi_port *pport)
 		return true;
 	}
 
-	pport->cawake_status = hsi_get_cawake(pport);
-
-	if (pport->acwake_status || pport->cawake_status) {
+	if (pport->acwake_status || cur_cawake) {
 		dev_dbg(hsi_ctrl->dev, "Port %d: WAKE status: acwake_status %d,"
-			"cawake_status %d", pport->port_number,
-			pport->acwake_status, pport->cawake_status);
+			"cur_cawake %d", pport->port_number,
+			pport->acwake_status, cur_cawake);
 		return true;
 	}
 
@@ -190,7 +189,7 @@ void hsi_driver_cancel_write_interrupt(struct hsi_channel *ch)
 			 HSI_SYS_MPU_ENABLE_CH_REG(port, p->n_irq, channel));
 
 	if (!(enable & HSI_HST_DATAACCEPT(channel))) {
-		dev_dbg(&ch->dev->device, LOG_NAME "Write cancel on not "
+		dev_dbg(&ch->dev->device, "Write cancel on not "
 			"enabled channel %d ENABLE REG 0x%08X", channel,
 			enable);
 		return;
@@ -296,14 +295,16 @@ static void hsi_do_channel_rx(struct hsi_channel *ch)
 	dev_dbg(hsi_ctrl->dev,
 		"Data Available interrupt for channel %d.\n", n_ch);
 
+	/* Disable interrupts for polling if not needed */
+	if (!(ch->flags & HSI_CH_RX_POLL))
+		hsi_driver_disable_read_interrupt(ch);
+
 	/*
 	 * Check race condition: RX transmission initiated but DMA transmission
 	 * already started - acknowledge then ignore interrupt occurence
 	 */
-	if (ch->read_data.lch != -1) {
-		hsi_driver_disable_read_interrupt(ch);
+	if (ch->read_data.lch != -1)
 		goto done;
-	}
 
 	if (ch->flags & HSI_CH_RX_POLL)
 		rx_poll = 1;
@@ -316,7 +317,6 @@ static void hsi_do_channel_rx(struct hsi_channel *ch)
 		}
 	}
 
-	hsi_driver_disable_read_interrupt(ch);
 	hsi_reset_ch_read(ch);
 
 	/* Check if FIFO is correctly emptied */
@@ -445,7 +445,9 @@ static u32 hsi_driver_int_proc(struct hsi_port *pport,
 	if (status_reg & HSI_BREAKDETECTED) {
 		dev_info(hsi_ctrl->dev, "Hardware BREAK on port %d\n", port);
 		hsi_outl(0, base, HSI_HSR_BREAK_REG(port));
+		spin_unlock(&hsi_ctrl->lock);
 		hsi_port_event_handler(pport, HSI_EVENT_BREAK_DETECTED, NULL);
+		spin_lock(&hsi_ctrl->lock);
 
 		channels_served |= HSI_BREAKDETECTED;
 	}
@@ -469,9 +471,11 @@ static u32 hsi_driver_int_proc(struct hsi_port *pport,
 				port, hsr_err_reg, "TX Mapping Error");
 		/* Clear error event bit */
 		hsi_outl(hsr_err_reg, base, HSI_HSR_ERRORACK_REG(port));
-		if (hsr_err_reg)	/* ignore spurious errors */
+		if (hsr_err_reg) {	/* ignore spurious errors */
+			spin_unlock(&hsi_ctrl->lock);
 			hsi_port_event_handler(pport, HSI_EVENT_ERROR, NULL);
-		else
+			spin_lock(&hsi_ctrl->lock);
+		} else
 			dev_dbg(hsi_ctrl->dev, "Spurious HSI error!\n");
 
 		channels_served |= HSI_ERROROCCURED;

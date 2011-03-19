@@ -264,7 +264,7 @@ int hsi_open(struct hsi_device *dev)
 		pr_err(LOG_NAME "Wrong HSI device %p\n", dev);
 		return -EINVAL;
 	}
-	dev_dbg(dev->device.parent, "%s\n", __func__);
+	dev_dbg(dev->device.parent, "%s ch %d\n", __func__, dev->n_ch);
 
 	ch = dev->ch;
 	if (!ch->read_done || !ch->write_done) {
@@ -315,7 +315,7 @@ EXPORT_SYMBOL(hsi_open);
  * Transfer is only completed when the write_done callback is called.
  *
  */
-int hsi_write(struct hsi_device *dev, u32 * addr, unsigned int size)
+int hsi_write(struct hsi_device *dev, u32 *addr, unsigned int size)
 {
 	struct hsi_channel *ch;
 	int err;
@@ -331,8 +331,8 @@ int hsi_write(struct hsi_device *dev, u32 * addr, unsigned int size)
 			dev, addr, size);
 		return -EINVAL;
 	}
-	dev_dbg(dev->device.parent, "%s @%x, size %d u32\n", __func__,
-		(u32) addr, size);
+	dev_dbg(dev->device.parent, "%s ch %d, @%x, size %d u32\n", __func__,
+		dev->n_ch, (u32) addr, size);
 
 	if (unlikely(!(dev->ch->flags & HSI_CH_OPEN))) {
 		dev_err(dev->device.parent, "HSI device NOT open\n");
@@ -375,6 +375,7 @@ int hsi_write(struct hsi_device *dev, u32 * addr, unsigned int size)
 	if (unlikely(err < 0)) {
 		ch->write_data.addr = NULL;
 		ch->write_data.size = 0;
+		dev_err(dev->device.parent, "Failed to program write\n");
 	}
 
 	spin_unlock_bh(&ch->hsi_port->hsi_controller->lock);
@@ -396,7 +397,7 @@ EXPORT_SYMBOL(hsi_write);
  * Data is only available in the buffer when the read_done callback is called.
  *
  */
-int hsi_read(struct hsi_device *dev, u32 * addr, unsigned int size)
+int hsi_read(struct hsi_device *dev, u32 *addr, unsigned int size)
 {
 	struct hsi_channel *ch;
 	int err;
@@ -411,8 +412,9 @@ int hsi_read(struct hsi_device *dev, u32 * addr, unsigned int size)
 			"hsi_device %p data %p count %d", dev, addr, size);
 		return -EINVAL;
 	}
-	dev_dbg(dev->device.parent, "%s @%x, size %d u32\n", __func__,
-		(u32) addr, size);
+
+	dev_dbg(dev->device.parent, "%s ch %d, @%x, size %d u32\n", __func__,
+		dev->n_ch, (u32) addr, size);
 
 	if (unlikely(!(dev->ch->flags & HSI_CH_OPEN))) {
 		dev_err(dev->device.parent, "HSI device NOT open\n");
@@ -452,6 +454,7 @@ int hsi_read(struct hsi_device *dev, u32 * addr, unsigned int size)
 	if (unlikely(err < 0)) {
 		ch->read_data.addr = NULL;
 		ch->read_data.size = 0;
+		dev_err(dev->device.parent, "Failed to program read\n");
 	}
 
 done:
@@ -542,11 +545,11 @@ void hsi_read_cancel(struct hsi_device *dev)
 EXPORT_SYMBOL(hsi_read_cancel);
 
 /**
- * hsi_poll - HSI poll, enables data reception
+ * hsi_poll - HSI poll feature, enables data interrupt on frame reception
  * @dev - hsi device channel reference to apply the I/O control
  *						(or port associated to it)
  *
- * Return 0 on sucess, a negative value on failure.
+ * Return 0 on success, a negative value on failure.
  *
  */
 int hsi_poll(struct hsi_device *dev)
@@ -582,6 +585,47 @@ int hsi_poll(struct hsi_device *dev)
 	return err;
 }
 EXPORT_SYMBOL(hsi_poll);
+
+/**
+ * hsi_unpoll - HSI poll feature, disables data interrupt on frame reception
+ * @dev - hsi device channel reference to apply the I/O control
+ *						(or port associated to it)
+ *
+ * Return 0 on success, a negative value on failure.
+ *
+ */
+int hsi_unpoll(struct hsi_device *dev)
+{
+	struct hsi_channel *ch;
+	struct hsi_dev *hsi_ctrl;
+
+	if (unlikely(!dev || !dev->ch))
+		return -EINVAL;
+	dev_dbg(dev->device.parent, "%s\n", __func__);
+
+	if (unlikely(!(dev->ch->flags & HSI_CH_OPEN))) {
+		dev_err(dev->device.parent, "HSI device NOT open\n");
+		return -EINVAL;
+	}
+
+	ch = dev->ch;
+	hsi_ctrl = ch->hsi_port->hsi_controller;
+
+	spin_lock_bh(&hsi_ctrl->lock);
+	hsi_clocks_enable_channel(dev->device.parent, dev->ch->channel_number,
+				__func__);
+
+	ch->flags &= ~HSI_CH_RX_POLL;
+
+	hsi_driver_disable_read_interrupt(ch);
+
+	hsi_clocks_disable_channel(dev->device.parent, dev->ch->channel_number,
+				__func__);
+	spin_unlock_bh(&hsi_ctrl->lock);
+
+	return 0;
+}
+EXPORT_SYMBOL(hsi_unpoll);
 
 /**
  * hsi_ioctl - HSI I/O control
@@ -757,7 +801,7 @@ int hsi_ioctl(struct hsi_device *dev, unsigned int command, void *arg)
 			err = -EFAULT;
 			goto out;
 		}
-		*(u8 *)arg = hsi_get_rx_fifo_occupancy(hsi_ctrl, fifo);
+		*(size_t *)arg = hsi_get_rx_fifo_occupancy(hsi_ctrl, fifo);
 		break;
 	default:
 		err = -ENOIOCTLCMD;
@@ -785,7 +829,7 @@ void hsi_close(struct hsi_device *dev)
 		pr_err(LOG_NAME "Trying to close wrong HSI device %p\n", dev);
 		return;
 	}
-	dev_dbg(dev->device.parent, "%s\n", __func__);
+	dev_dbg(dev->device.parent, "%s ch %d\n", __func__, dev->n_ch);
 
 	hsi_ctrl = dev->ch->hsi_port->hsi_controller;
 
