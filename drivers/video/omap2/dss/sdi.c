@@ -112,7 +112,7 @@ static int sdi_display_enable(struct omap_dss_device *dssdev)
 	if (r)
 		goto err2;
 
-	r = dispc_set_clock_div(&dispc_cinfo);
+	r = dispc_set_clock_div(OMAP_DSS_CHANNEL_LCD, &dispc_cinfo);
 	if (r)
 		goto err2;
 
