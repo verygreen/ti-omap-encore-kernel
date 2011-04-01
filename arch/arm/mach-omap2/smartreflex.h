@@ -283,7 +283,7 @@ int sr_recalibrate(int srid, u32 target_opp, u32 current_opp);
 #else
 static inline void enable_smartreflex(int srid) {}
 static inline void disable_smartreflex(int srid) {}
-int sr_recalibrate(int srid, u32 target_opp, u32 current_opp)
+static inline int sr_recalibrate(int srid, u32 target_opp, u32 current_opp)
 {
 	return -EINVAL;
 }
