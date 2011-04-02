@@ -1,4 +1,3 @@
-
 /*
  *
  * Copyright (C) 2008 Texas Instruments Inc.
@@ -88,7 +87,10 @@
 #include <media/v4l2-int-device.h>
 
 #ifdef CONFIG_PM
-#include <../drivers/media/video/omap-vout/omapvout.h>
+#include <media/videobuf-core.h>
+#include <media/v4l2-device.h>
+#include <plat/vrfb.h>
+#include <../drivers/media/video/omap/omap_voutdef.h>
 #endif
 
 #ifndef CONFIG_TWL4030_CORE
@@ -415,16 +417,15 @@ static struct resource boxer_vout_resource[2] = { };
 static struct resource boxer_vout_resource[2] = {
 };
 #endif
-/*
+
 #ifdef CONFIG_PM
 struct vout_platform_data boxer_vout_data = {
 	.set_min_bus_tput = omap_pm_set_min_bus_tput,
 	.set_max_mpu_wakeup_lat =  omap_pm_set_max_mpu_wakeup_lat,
-	.set_vdd1_opp = omap_pm_set_min_mpu_freq,
-	.set_cpu_freq = omap_pm_cpu_set_freq,
+	.set_min_mpu_freq = omap_pm_set_min_mpu_freq,
 };
 #endif
-*/
+
 static struct platform_device boxer_vout_device = {
 	.name		= "omap_vout",
 	.num_resources	= ARRAY_SIZE(boxer_vout_resource),
@@ -432,7 +433,7 @@ static struct platform_device boxer_vout_device = {
 	.id		= -1,
 #ifdef CONFIG_PM
 	.dev		= {
-//		.platform_data = &boxer_vout_data,
+		.platform_data = &boxer_vout_data,
 	}
 #else
 	.dev		= {
@@ -1401,6 +1402,9 @@ static void __init omap_boxer_init(void)
         audio_dac_3100_dev_init();
 #endif
 	boxer_backlight_init();
+
+	/* Bluetooth pin */
+	omap_mux_init_gpio(60, OMAP_PIN_OUTPUT);
 #if defined(CONFIG_USB_ANDROID) || defined(CONFIG_USB_ANDROID_MODULE)
 	platform_device_register(&usb_mass_storage_device);
 	// Set the device serial number passed in from the bootloader.
