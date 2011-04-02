@@ -33,6 +33,10 @@
 #include "mmc-twl4030.h"
 #include <linux/i2c/twl.h>
 
+#ifdef CONFIG_MACH_ENCORE
+#include <plat/board-boxer.h>
+#endif /* CONFIG_MACH_ENCORE */
+
 #if defined(CONFIG_REGULATOR) && \
 	(defined(CONFIG_MMC_OMAP_HS) || defined(CONFIG_MMC_OMAP_HS_MODULE))
 
@@ -73,6 +77,18 @@ static int twl_mmc_card_detect(int irq)
 			continue;
 		if (irq != mmc->slots[0].card_detect_irq)
 			continue;
+
+#ifdef CONFIG_MACH_ENCORE
+		/* NOTE: assumes card detect signal is active-low */
+		/* for EVT2 and later, card is high when present*/
+		if (i==0) {
+			if(is_encore_board_evt2()) {
+				return gpio_get_value_cansleep(mmc->slots[0].switch_pin);
+			} else {
+				return !gpio_get_value_cansleep(mmc->slots[0].switch_pin);
+			}       
+		} else
+#endif /* CONFIG_MACH_ENCORE */
 
 		/* NOTE: assumes card detect signal is active-low */
 		if (!cpu_is_omap44xx()) {

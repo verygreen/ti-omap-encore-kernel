@@ -72,6 +72,10 @@ config MACH_OMAP_LDP
 	depends on ARCH_OMAP3 && ARCH_OMAP34XX
 	select OMAP_PACKAGE_CBB
 
+config MACH_ENCORE
+	bool "Barnes & Noble Encore (Nook Color)"
+	depends on ARCH_OMAP3 && ARCH_OMAP34XX
+
 config MACH_OVERO
 	bool "Gumstix Overo board"
 	depends on ARCH_OMAP3 && ARCH_OMAP34XX
@@ -93,7 +97,7 @@ config MACH_OMAP3_PANDORA
 
 config WIFI_CONTROL_FUNC
         bool "Enable WiFi control function abstraction"
-	depends on MACH_OMAP_ZOOM2 || MACH_SHOLES || MACH_OMAP_4430SDP || MACH_OMAP_ZOOM3
+	depends on MACH_OMAP_ZOOM2 || MACH_SHOLES || MACH_OMAP_4430SDP || MACH_OMAP_ZOOM3 || MACH_ENCORE
         help
           Enables Power/Reset/Carddetect function abstraction
 
@@ -176,6 +180,14 @@ config MACH_OMAP_3630SDP
 config MACH_OMAP_4430SDP
 	bool "OMAP 4430 SDP board"
 	depends on ARCH_OMAP4
+
+config WLAN_POWER_EVT1
+	bool "WLAN power support"
+	depends on MACH_ENCORE
+	default "y"
+	help
+	  Has to be set for B&N Encore board.
+
 
 config ERRATA_OMAP4_AXI2OCP
 	bool "OMAP 4430 axi2ocp errata workaround"
