@@ -51,4 +51,18 @@ config PANEL_SIL9022
 	help
 		HDMI interface used in the Zoom board
 
+config PANEL_BOXER
+	tristate "TI Boxer Panel (B&N Nook)"
+	help
+	  LCD Panel used in the TI Boxer and B&N Nook
+
+config PANEL_BOXER_CPT
+	bool "Boxer board with CPT panel"
+	default y
+	help
+	depends on PANEL_BOXER
+	  Select if you have the boxer board
+	  with CPT panel mounted. For Samsung
+	  set to N.
+
 endmenu

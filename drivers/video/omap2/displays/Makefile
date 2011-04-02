@@ -8,3 +8,4 @@ obj-$(CONFIG_PANEL_ZOOM2) += panel-zoom2.o
 obj-$(CONFIG_PANEL_SHOLES) += panel-sholes.o
 obj-$(CONFIG_PANEL_NEC) += panel-nec.o
 obj-$(CONFIG_PANEL_SIL9022) += panel_sil9022.o
+obj-$(CONFIG_PANEL_BOXER) += panel-boxer.o
