@@ -237,6 +237,9 @@
 #define PMBR1				0x0D
 #define GPIO_USB_4PIN_ULPI_2430C	(3 << 0)
 
+#ifdef CONFIG_CHARGER_MAX8903
+extern void max8903_charger_enable(int);
+#endif
 
 
 enum linkstat {
@@ -630,6 +633,10 @@ static irqreturn_t twl4030_usb_irq(int irq, void *_twl)
 		}
 
 		twl4030charger_usb_en(status == USB_LINK_VBUS);
+
+#ifdef CONFIG_CHARGER_MAX8903
+		max8903_charger_enable(status == USB_LINK_VBUS);
+#endif
 	}
 	sysfs_notify(&twl->dev->kobj, NULL, "vbus");
 

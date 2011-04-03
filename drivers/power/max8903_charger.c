@@ -120,7 +120,9 @@ const char* charger_str[CHARGER_MAX_TYPE]={"INVALID CHARGER",
 extern void max17042_update_callback(u8 charger_in);
 
 DEFINE_MUTEX(charger_mutex);
-static DECLARE_COMPLETION(charger_probed);
+
+int charger_probed = 0;
+int charger_unprobed_state = 0;
 
 /*data struct for the charger status and control*/
 struct max8903_charger {
@@ -260,7 +262,10 @@ void max8903_charger_enable(int on)
     u8 value;
     u8 charger_type = 0;
 
-    wait_for_completion(&charger_probed);   
+    if (!charger_probed) {
+        charger_unprobed_state = on;
+	return;
+    }
 
     /*USB/WALL removal*/
     if (on == 0) {
@@ -593,7 +598,10 @@ static int __init max8903_charger_probe(struct platform_device *pdev)
         goto exitd;
     }
 
-    complete_all(&charger_probed);
+    charger_probed = 1;
+    if (charger_unprobed_state)
+        max8903_charger_enable(charger_unprobed_state);
+
     return 0;
 
 exitd:
