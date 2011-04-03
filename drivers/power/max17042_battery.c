@@ -58,7 +58,8 @@
 #define HISTORY_MAGIC		0x1234
 
 /*leave the debug msg on until later release TBD*/
-#define DEBUG(x...) 			printk(x)
+//#define DEBUG(x...) 			printk(x)
+#define DEBUG(x...)
 
 static const enum dump_format {
     DUMP_FMT_NONE,
@@ -288,7 +289,7 @@ static int max17042_set_config( struct max17042_data *max17042)
 {
 	int err; 
 			   
-	static const int config = (MAX17042_CONFIG_Ts | 
+	static const u16 config = (MAX17042_CONFIG_Ts |
 #ifndef DEBUG_NO_BATTERY
                           MAX17042_CONFIG_Aen | 
 #endif
