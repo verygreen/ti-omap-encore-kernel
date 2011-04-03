@@ -443,49 +443,6 @@ static struct platform_device boxer_vout_device = {
 	}
 #endif
 };
-/* This is just code left here to leverage on this for Maxim battery charger*/
-#ifdef CONFIG_REGULATOR_MAXIM_CHARGER
-static struct bq24073_mach_info bq24073_init_dev_data = {
-	.gpio_nce = OMAP_BQ24072_CEN_GPIO,
-	.gpio_en1 = OMAP_BQ24072_EN1_GPIO,
-	.gpio_en2 = OMAP_BQ24072_EN2_GPIO,
-	.gpio_nce_state = 1,
-	.gpio_en1_state = 0,
-	.gpio_en2_state = 0,
-};
-
-static struct regulator_consumer_supply bq24073_vcharge_supply = {
-       .supply         = "bq24073",
-};
-
-static struct regulator_init_data bq24073_init  = {
-
-       .constraints = {
-               .min_uV                 = 0,
-               .max_uV                 = 5000000,
-               .min_uA                 = 0,
-               .max_uA                 = 1500000,
-               .valid_modes_mask       = REGULATOR_MODE_NORMAL
-                                       | REGULATOR_MODE_STANDBY,
-               .valid_ops_mask         = REGULATOR_CHANGE_CURRENT
-                                       | REGULATOR_CHANGE_MODE
-                                       | REGULATOR_CHANGE_STATUS,
-       },
-       .num_consumer_supplies  = 1,
-       .consumer_supplies      = &bq24073_vcharge_supply,
-
-       .driver_data = &bq24073_init_dev_data,
-};
-
-/* GPIOS need to be in order of BQ24073 */
-static struct platform_device boxer_curr_regulator_device = {
-	.name           = "bq24073", /* named after init manager for ST */
-	.id             = -1,
-	.dev 		= {
-		.platform_data = &bq24073_init,
-	},
-};
-#endif
 
 static void encore_backlight_set_power(struct omap_pwm_led_platform_data *self, int on_off)
 {
@@ -609,9 +566,6 @@ static struct platform_device *boxer_devices[] __initdata = {
 //	&boxer_wl127x_device,
 #endif
 	&boxer_vout_device,
-#ifdef CONFIG_REGULATOR_MAXIM_CHARGER
-	&boxer_curr_regulator_device,
-#endif
 #ifdef CONFIG_CHARGER_MAX8903
 	&max8903_charger_device,
 #endif
@@ -768,9 +722,6 @@ static struct omap_board_config_kernel boxer_config[] __initdata = {
 
 static struct twl4030_usb_data boxer_usb_data = {
       .usb_mode	= T2_USB_MODE_ULPI,
-#ifdef CONFIG_REGULATOR_MAXIM_CHARGER
-      .bci_supply     = &bq24073_vcharge_supply,
-#endif
 };
 static struct twl4030_gpio_platform_data boxer_gpio_data = {
 	.gpio_base	= OMAP_MAX_GPIO_LINES,
