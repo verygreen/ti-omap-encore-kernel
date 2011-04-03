@@ -120,7 +120,6 @@ static struct platform_device boxer_wifi_device = {
 static int __init boxer_wifi_init(void)
 {
 	int ret;
-return 0;
 
 	printk("%s: start\n", __func__);
 	ret = gpio_request(BOXER_WIFI_IRQ_GPIO, "wifi_irq");
@@ -154,5 +153,4 @@ return 0;
 out:
         return ret;
 }
-
 device_initcall(boxer_wifi_init);
