@@ -236,7 +236,6 @@ static DECLARE_COMPLETION(panel_on);
 
 static int boxer_panel_enable_lcd(struct omap_dss_device *dssdev)
 {
-printk("boxer_panel_enable_lcd");
 	complete_all(&panel_on);	
 	//omap_pm_set_min_bus_tput(&dssdev->dev, OCP_INITIATOR_AGENT,166 * 1000 * 4);
 	return 0;
@@ -244,7 +243,6 @@ printk("boxer_panel_enable_lcd");
 
 static void boxer_panel_disable_lcd(struct omap_dss_device *dssdev)
 {
-printk("boxer_panel_disable_lcd\n");
 	INIT_COMPLETION(panel_on);
 	/* disabling LCD on Boxer EVT1 shuts down SPI bus, so don't touch! */
     omap_pm_set_min_bus_tput(&dssdev->dev, OCP_INITIATOR_AGENT, 0);
@@ -1155,6 +1153,97 @@ static struct i2c_board_info __initdata boxer_i2c_bus2_info[] = {
 };
 
 
+#if defined(CONFIG_USB_ANDROID) || defined(CONFIG_USB_ANDROID_MODULE)
+static struct usb_mass_storage_platform_data mass_storage_pdata = {
+	.vendor = "B&N     ",
+	.product = "Ebook Disk      ",
+	.release = 0x0100,
+};
+
+static struct platform_device usb_mass_storage_device = {
+	.name = "usb_mass_storage",
+	.id = -1,
+	.dev = {
+		.platform_data = &mass_storage_pdata,
+		},
+};
+
+// Reserved for serial number passed in from the bootloader.
+static char adb_serial_number[32] = "";
+
+static char *usb_functions_ums[] = {
+	"usb_mass_storage",
+};
+
+static char *usb_functions_ums_adb[] = {
+	"usb_mass_storage",
+	"adb",
+};
+
+static char *usb_functions_rndis[] = {
+	"rndis",
+};
+
+static char *usb_functions_rndis_adb[] = {
+	"rndis",
+	"adb",
+};
+
+static char *usb_functions_all[] = {
+#ifdef CONFIG_USB_ANDROID_RNDIS
+	"rndis",
+#endif
+	"usb_mass_storage",
+	"adb",
+#ifdef CONFIG_USB_ANDROID_ACM
+	"acm",
+#endif
+};
+
+static struct android_usb_product usb_products[] = {
+	{
+		.product_id	= ENCORE_PRODUCT_ID,
+		.num_functions	= ARRAY_SIZE(usb_functions_ums),
+		.functions	= usb_functions_ums,
+	},
+	{
+		.product_id	= ENCORE_ADB_PRODUCT_ID,
+		.num_functions	= ARRAY_SIZE(usb_functions_ums_adb),
+		.functions	= usb_functions_ums_adb,
+	},
+	{
+		.product_id	= ENCORE_RNDIS_PRODUCT_ID,
+		.num_functions	= ARRAY_SIZE(usb_functions_rndis),
+		.functions	= usb_functions_rndis,
+	},
+	{
+		.product_id	= ENCORE_RNDIS_ADB_PRODUCT_ID,
+		.num_functions	= ARRAY_SIZE(usb_functions_rndis_adb),
+		.functions	= usb_functions_rndis_adb,
+	},
+};
+
+static struct android_usb_platform_data android_usb_pdata = {
+	.vendor_id	= ENCORE_VENDOR_ID,
+	.product_id	= ENCORE_PRODUCT_ID,
+	.manufacturer_name = "B&N",
+	.product_name	= "NookColor",
+	.serial_number	= "11223344556677",
+	.num_products   = ARRAY_SIZE(usb_products),
+	.products	= usb_products,
+	.num_functions	= ARRAY_SIZE(usb_functions_all),
+	.functions	= usb_functions_all,
+};
+
+static struct platform_device android_usb_device = {
+	.name		= "android_usb",
+	.id		= -1,
+	.dev		= {
+		.platform_data = &android_usb_pdata,
+	},
+};
+#endif
+
 static struct omap_musb_board_data musb_board_data = {
 	.interface_type		= MUSB_INTERFACE_ULPI,
 	.mode			= MUSB_PERIPHERAL,
@@ -1267,7 +1356,16 @@ static void __init omap_boxer_init(void)
 
 	/* Bluetooth pin */
 	omap_mux_init_gpio(60, OMAP_PIN_OUTPUT);
-
+#if defined(CONFIG_USB_ANDROID) || defined(CONFIG_USB_ANDROID_MODULE)
+	platform_device_register(&usb_mass_storage_device);
+	// Set the device serial number passed in from the bootloader.
+	if (system_serial_high != 0 || system_serial_low != 0) {
+		snprintf(adb_serial_number, sizeof(adb_serial_number), "%08x%08x", system_serial_high, system_serial_low);
+		adb_serial_number[16] = '\0';
+		android_usb_pdata.serial_number = adb_serial_number;
+	}
+	platform_device_register(&android_usb_device);
+#endif
         BUG_ON(!cpu_is_omap3630());
 }
 
