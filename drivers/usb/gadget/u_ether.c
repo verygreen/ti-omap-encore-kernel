@@ -23,6 +23,7 @@
 /* #define VERBOSE_DEBUG */
 
 #include <linux/kernel.h>
+#include <linux/gfp.h>
 #include <linux/device.h>
 #include <linux/ctype.h>
 #include <linux/etherdevice.h>
@@ -53,15 +54,6 @@
  */
 
 #define UETH__VERSION	"29-May-2008"
-
-/*
- * Override the NET_IP_ALIGN macro to 0 bytes to have destination buffer
- * aligned at 4 bytes thereby getting alligned adress for DMA access
- */
-#if defined(CONFIG_ARCH_OMAP3) || defined(CONFIG_ARCH_OMAP4)
-#undef NET_IP_ALIGN
-#define NET_IP_ALIGN  0
-#endif
 
 struct eth_dev {
 	/* lock is held while accessing port_usb
@@ -723,7 +715,7 @@ static u8 __init nibble(unsigned char c)
 	return 0;
 }
 
-static int __init get_ether_addr(const char *str, u8 *dev_addr)
+static int get_ether_addr(const char *str, u8 *dev_addr)
 {
 	if (str) {
 		unsigned	i;
@@ -755,6 +747,10 @@ static const struct net_device_ops eth_netdev_ops = {
 	.ndo_validate_addr	= eth_validate_addr,
 };
 
+static struct device_type gadget_type = {
+	.name	= "gadget",
+};
+
 /**
  * gether_setup - initialize one ethernet-over-usb link
  * @g: gadget to associated with these links
@@ -768,7 +764,7 @@ static const struct net_device_ops eth_netdev_ops = {
  *
  * Returns negative errno, or zero on success
  */
-int __init gether_setup(struct usb_gadget *g, u8 ethaddr[ETH_ALEN])
+int gether_setup(struct usb_gadget *g, u8 ethaddr[ETH_ALEN])
 {
 	struct eth_dev		*dev;
 	struct net_device	*net;
@@ -817,6 +813,7 @@ int __init gether_setup(struct usb_gadget *g, u8 ethaddr[ETH_ALEN])
 
 	dev->gadget = g;
 	SET_NETDEV_DEV(net, &g->dev);
+	SET_NETDEV_DEVTYPE(net, &gadget_type);
 
 	status = register_netdev(net);
 	if (status < 0) {
