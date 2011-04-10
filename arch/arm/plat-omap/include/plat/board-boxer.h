@@ -72,7 +72,10 @@ static inline int is_encore_board_evt1b(void)
     return (system_rev == BOARD_ENCORE_REV_EVT1B);
 }
 
-#define BN_USB_VENDOR_ID            0x2080
-#define BN_USB_PRODUCT_ID_ENCORE    0x0002
+#define ENCORE_VENDOR_ID            0x2080
+#define ENCORE_PRODUCT_ID           0x0002
+#define ENCORE_ADB_PRODUCT_ID       0x0002
+#define ENCORE_RNDIS_PRODUCT_ID     0x0004
+#define ENCORE_RNDIS_ADB_PRODUCT_ID 0x0005
 
 #endif /* __ASM_ARCH_OMAP_BOXER_H */

@@ -1154,10 +1154,12 @@ static struct i2c_board_info __initdata boxer_i2c_bus2_info[] = {
 
 
 #if defined(CONFIG_USB_ANDROID) || defined(CONFIG_USB_ANDROID_MODULE)
+#if defined(CONFIG_USB_ANDROID_MASS_STORAGE)
 static struct usb_mass_storage_platform_data mass_storage_pdata = {
 	.vendor = "B&N     ",
 	.product = "Ebook Disk      ",
 	.release = 0x0100,
+	.nluns = 2
 };
 
 static struct platform_device usb_mass_storage_device = {
@@ -1167,81 +1169,7 @@ static struct platform_device usb_mass_storage_device = {
 		.platform_data = &mass_storage_pdata,
 		},
 };
-
-// Reserved for serial number passed in from the bootloader.
-static char adb_serial_number[32] = "";
-
-static char *usb_functions_ums[] = {
-	"usb_mass_storage",
-};
-
-static char *usb_functions_ums_adb[] = {
-	"usb_mass_storage",
-	"adb",
-};
-
-static char *usb_functions_rndis[] = {
-	"rndis",
-};
-
-static char *usb_functions_rndis_adb[] = {
-	"rndis",
-	"adb",
-};
-
-static char *usb_functions_all[] = {
-#ifdef CONFIG_USB_ANDROID_RNDIS
-	"rndis",
 #endif
-	"usb_mass_storage",
-	"adb",
-#ifdef CONFIG_USB_ANDROID_ACM
-	"acm",
-#endif
-};
-
-static struct android_usb_product usb_products[] = {
-	{
-		.product_id	= ENCORE_PRODUCT_ID,
-		.num_functions	= ARRAY_SIZE(usb_functions_ums),
-		.functions	= usb_functions_ums,
-	},
-	{
-		.product_id	= ENCORE_ADB_PRODUCT_ID,
-		.num_functions	= ARRAY_SIZE(usb_functions_ums_adb),
-		.functions	= usb_functions_ums_adb,
-	},
-	{
-		.product_id	= ENCORE_RNDIS_PRODUCT_ID,
-		.num_functions	= ARRAY_SIZE(usb_functions_rndis),
-		.functions	= usb_functions_rndis,
-	},
-	{
-		.product_id	= ENCORE_RNDIS_ADB_PRODUCT_ID,
-		.num_functions	= ARRAY_SIZE(usb_functions_rndis_adb),
-		.functions	= usb_functions_rndis_adb,
-	},
-};
-
-static struct android_usb_platform_data android_usb_pdata = {
-	.vendor_id	= ENCORE_VENDOR_ID,
-	.product_id	= ENCORE_PRODUCT_ID,
-	.manufacturer_name = "B&N",
-	.product_name	= "NookColor",
-	.serial_number	= "11223344556677",
-	.num_products   = ARRAY_SIZE(usb_products),
-	.products	= usb_products,
-	.num_functions	= ARRAY_SIZE(usb_functions_all),
-	.functions	= usb_functions_all,
-};
-
-static struct platform_device android_usb_device = {
-	.name		= "android_usb",
-	.id		= -1,
-	.dev		= {
-		.platform_data = &android_usb_pdata,
-	},
-};
 #endif
 
 static struct omap_musb_board_data musb_board_data = {
@@ -1354,14 +1282,9 @@ static void __init omap_boxer_init(void)
 	boxer_backlight_init();
 
 #if defined(CONFIG_USB_ANDROID) || defined(CONFIG_USB_ANDROID_MODULE)
+#if defined(CONFIG_USB_ANDROID_MASS_STORAGE)
 	platform_device_register(&usb_mass_storage_device);
-	// Set the device serial number passed in from the bootloader.
-	if (system_serial_high != 0 || system_serial_low != 0) {
-		snprintf(adb_serial_number, sizeof(adb_serial_number), "%08x%08x", system_serial_high, system_serial_low);
-		adb_serial_number[16] = '\0';
-		android_usb_pdata.serial_number = adb_serial_number;
-	}
-	platform_device_register(&android_usb_device);
+#endif
 #endif
         BUG_ON(!cpu_is_omap3630());
 }
