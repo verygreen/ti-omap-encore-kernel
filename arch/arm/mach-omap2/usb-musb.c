@@ -405,7 +405,7 @@ void __init usb_musb_init(struct omap_musb_board_data *board_data)
 		 * Errata 1.166 idle_req/ack is broken in omap3430
 		 * workaround is to disable the autodile bit for omap3430.
 		 */
-		if (cpu_is_omap3430())
+		if (cpu_is_omap3430() || cpu_is_omap3630())
 			oh->flags |= HWMOD_NO_OCP_AUTOIDLE;
 
 		musb_plat.oh = oh;
