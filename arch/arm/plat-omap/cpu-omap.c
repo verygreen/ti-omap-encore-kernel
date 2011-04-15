@@ -170,6 +170,15 @@ static int omap_target(struct cpufreq_policy *policy,
 	}
 #endif
 #endif
+
+#ifdef CONFIG_BRIDGE_DVFS
+	/*
+	 * Inform the PM architecture of this change.  Currently the only
+	 * need for this is when using DSP bridge DVFS -- to coordinate with
+	 * frequency requests made by the DSP.
+	 */
+	omap_pm_cpu_set_freq(freq);
+#endif
 	return ret;
 }
 

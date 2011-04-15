@@ -26,10 +26,18 @@
 #include <plat/omap-pm.h>
 #include <plat/omap_device.h>
 #include <plat/powerdomain.h>
+#include <plat/clockdomain.h>
 
+struct cpufreq_frequency_table *mpu_freq_table = NULL;
+static unsigned int mpu_req_freq = 0;
+
+#ifdef CONFIG_BRIDGE_DVFS
 struct omap_opp *dsp_opps;
-struct omap_opp *mpu_opps;
-struct omap_opp *l3_opps;
+static struct cpufreq_frequency_table *dsp_freq_table = NULL;
+static unsigned int dsp_req_id = 0;
+static unsigned int mpu_req_id = 0;
+static int ft_count = 0;
+#endif
 
 static DEFINE_MUTEX(bus_tput_mutex);
 static DEFINE_MUTEX(mpu_tput_mutex);
@@ -437,29 +445,120 @@ int omap_pm_set_min_clk_rate(struct device *dev, struct clk *c, long r)
 }
 
 /*
+ * Must be called after clock framework is initialized.  Also, it must wait
+ * for board init to enable any frequencies that are off by default in the
+ * OPP table (done only for some boards).
+ *
+ * Returns 0 on success, < 0 errno on error.
+ */
+static int initialize_tables(void)
+{
+	struct device *mpu_dev = omap2_get_mpuss_device();
+	int ret = 0;
+#ifdef CONFIG_BRIDGE_DVFS
+	struct device *iva_dev = omap2_get_iva_device();
+	struct omap_opp *opp;
+	int i;
+#endif
+
+	if (!mpu_freq_table) {
+		opp_init_cpufreq_table(mpu_dev, &mpu_freq_table);
+		if (!mpu_freq_table) {
+			ret = -ENOMEM;
+			goto error;
+		}
+	}
+
+#ifdef CONFIG_BRIDGE_DVFS
+	if (!dsp_freq_table) {
+		opp_init_cpufreq_table(iva_dev, &dsp_freq_table);
+		if (!dsp_freq_table) {
+			ret = -ENOMEM;
+			goto error;
+		}
+	}
+
+	ft_count = opp_get_opp_count(iva_dev);
+	if (ft_count != opp_get_opp_count(mpu_dev)) {
+		printk(KERN_ERR "Mismatched DSP/MPU OPP count\n");
+		ret = -EINVAL;
+		goto error;
+	}
+
+	/*
+	 * The DSP wants a table of struct omap_opp, with the first data in the
+	 * first (not 0th) location and ending with a zero element.
+	 */
+	dsp_opps = kmalloc((ft_count + 2) * sizeof(struct omap_opp),
+					GFP_KERNEL);
+	if (!dsp_opps) {
+		pr_err("%s FATAL ERROR: dsp_opps kmalloc failed\n",  __func__);
+		ret = -ENOMEM;
+		goto error;
+	}
+
+	for (i = 0; i < ft_count; i++) {
+		dsp_opps[i+1].enabled = 1;
+		dsp_opps[i+1].rate = dsp_freq_table[i].frequency;
+		dsp_opps[i+1].opp_id = dsp_freq_table[i].index + 1;
+		opp = opp_find_freq_exact(iva_dev,
+				dsp_freq_table[i].frequency * 1000, 1);
+		dsp_opps[i+1].u_volt = opp_get_voltage(opp);
+	}
+	/* The table starts with and is terminated with 0s */
+	dsp_opps[0].rate = dsp_opps[i+1].rate = 0;
+	dsp_opps[0].opp_id = dsp_opps[i+1].opp_id = 0;
+	dsp_opps[0].enabled = dsp_opps[i+1].enabled = 0;
+#endif	/* defined CONFIG_BRIDGE_DVFS */
+
+	return ret;
+
+error:
+	if (mpu_freq_table)
+		opp_exit_cpufreq_table(&mpu_freq_table);
+#ifdef CONFIG_BRIDGE_DVFS
+	if (dsp_freq_table)
+		opp_exit_cpufreq_table(&dsp_freq_table);
+#endif
+	return ret;
+}
+
+#ifdef CONFIG_BRIDGE_DVFS
+/*
  * DSP Bridge-specific constraints
  */
 
-const struct omap_opp *omap_pm_dsp_get_opp_table(void)
+struct omap_opp *omap_pm_dsp_get_opp_table(void)
 {
 	pr_debug("OMAP PM: DSP request for OPP table\n");
 
-	/*
-	 * Return DSP frequency table here:  The final item in the
-	 * array should have .rate = .opp_id = 0.
-	 */
-
-	return NULL;
+	if (!dsp_freq_table)
+		if (initialize_tables())
+			return NULL;
+	return dsp_opps;
 }
 
 void omap_pm_dsp_set_min_opp(u8 opp_id)
 {
-	if (opp_id == 0) {
+	struct device *mpu_dev = omap2_get_mpuss_device();
+	struct device *iva_dev = omap2_get_iva_device();
+	unsigned int selopp;
+	unsigned long currspeed = omap_device_get_rate(iva_dev)/1000;
+	int r = 0;
+
+	if (opp_id <= 0 || opp_id > ft_count + 1 || ft_count == 0) {
 		WARN_ON(1);
 		return;
 	}
 
 	pr_debug("OMAP PM: DSP requests minimum VDD1 OPP to be %d\n", opp_id);
+
+	/* Caller sees frequency table as [1..N], we "C" it as [0..N-1]. */
+	dsp_req_id = opp_id - 1;
+
+	if (!dsp_freq_table)
+		if (initialize_tables())
+			return;
 
 	/*
 	 *
@@ -474,23 +573,50 @@ void omap_pm_dsp_set_min_opp(u8 opp_id)
 	 * if it is higher than the current OPP clock rate.
 	 *
 	 */
+	if (dsp_req_id > mpu_req_id)
+		selopp = dsp_req_id;
+	else
+		selopp = mpu_req_id;
+
+	/* Is a change requested? */
+	if (currspeed == dsp_freq_table[selopp].frequency)
+		return;
+
+	r = omap_device_set_rate(mpu_dev, mpu_dev,
+				mpu_freq_table[selopp].frequency * 1000);
+	if (r)
+		printk(KERN_ERR "omap_device_set_rate error %d.\n", r);
+	else
+		omap_device_set_rate(iva_dev, iva_dev,
+				dsp_freq_table[selopp].frequency * 1000);
 }
 
 
 u8 omap_pm_dsp_get_opp(void)
 {
+	struct device *iva_dev = omap2_get_iva_device();
+	unsigned long rate = omap_device_get_rate(iva_dev) / 1000;
+	u8 i;
+
 	pr_debug("OMAP PM: DSP requests current DSP OPP ID\n");
 
-	/*
-	 * For l-o dev tree, call clk_get_rate() on VDD1 OPP clock
-	 *
-	 * CDP12.14+:
-	 * Call clk_get_rate() on the OPP custom clock, map that to an
-	 * OPP ID using the tables defined in board-*.c/chip-*.c files.
-	 */
+	if (!iva_dev)
+		return 0;
 
+	if (!dsp_freq_table)
+		if (initialize_tables())
+			return 0;
+
+	for (i = 1; dsp_opps[i].rate; i++) {
+		if (dsp_opps[i].rate == rate)
+			return i;
+	}
+	printk(KERN_ERR "%s: active dsp rate %ld not in dsp_opps table\n",
+			__func__, rate);
 	return 0;
+
 }
+#endif	/* defined CONFIG_BRIDGE_DVFS */
 
 /*
  * CPUFreq-originated constraint
@@ -503,21 +629,31 @@ struct cpufreq_frequency_table **omap_pm_cpu_get_freq_table(void)
 {
 	pr_debug("OMAP PM: CPUFreq request for frequency table\n");
 
-	/*
-	 * Return CPUFreq frequency table here: loop over
-	 * all VDD1 clkrates, pull out the mpu_ck frequencies, build
-	 * table
-	 */
+	if (!mpu_freq_table)
+		initialize_tables();
 
-	return NULL;
+	return &mpu_freq_table;
 }
 
 void omap_pm_cpu_set_freq(unsigned long f)
 {
+	struct device *mpu_dev = omap2_get_mpuss_device();
+	unsigned long currspeed = omap_device_get_rate(mpu_dev) / 1000;
+	unsigned int selfreq;
+	int r = 0;
+#ifdef CONFIG_BRIDGE_DVFS
+	struct device *iva_dev = omap2_get_iva_device();
+	int i;
+#endif
+
 	if (f == 0) {
 		WARN_ON(1);
 		return;
 	}
+
+	if (!mpu_freq_table)
+		if (initialize_tables())
+			return;
 
 	pr_debug("OMAP PM: CPUFreq requests CPU frequency to be set to %lu\n",
 		 f);
@@ -525,22 +661,52 @@ void omap_pm_cpu_set_freq(unsigned long f)
 	/*
 	 * For l-o dev tree, determine whether MPU freq or DSP OPP id
 	 * freq is higher.  Find the OPP ID corresponding to the
-	 * higher frequency.  Call clk_round_rate() and clk_set_rate()
-	 * on the OPP custom clock.
+	 * higher frequency.
 	 *
 	 * CDP should just be able to set the VDD1 OPP clock rate here.
 	 */
+	opp_find_freq_ceil(mpu_dev, &f);
+	mpu_req_freq = f / 1000;
+
+	/*
+	 * The governor calls us to let us know what it wants for an MPU
+	 * frequency.  In that case, it will already have ajusted it.
+	 * Otherwise, is the request for a frequency higher than the DSP
+	 * asked for?
+	 */
+	selfreq = mpu_req_freq;
+#ifdef CONFIG_BRIDGE_DVFS
+	if (mpu_req_freq < mpu_freq_table[dsp_req_id].frequency)
+		selfreq = mpu_freq_table[dsp_req_id].frequency;
+#endif
+
+	if (mpu_req_freq != currspeed) {
+		r = omap_device_set_rate(mpu_dev, mpu_dev, selfreq * 1000);
+		if (r)
+			printk(KERN_ERR "omap_device_set_rate error %d.\n", r);
+	}
+
+#ifdef CONFIG_BRIDGE_DVFS
+	/* Find the OPP and set the DSP freq too */
+	for (i = 0; i < ft_count; i++) {
+		if (mpu_freq_table[i].frequency == selfreq) {
+			omap_device_set_rate(iva_dev, iva_dev,
+					dsp_freq_table[i].frequency * 1000);
+			mpu_req_id = i;
+			break;
+		}
+	}
+#endif
 }
 
 unsigned long omap_pm_cpu_get_freq(void)
 {
+	struct device *mpu_dev = omap2_get_mpuss_device();
+	unsigned long rate = omap_device_get_rate(mpu_dev);
+
 	pr_debug("OMAP PM: CPUFreq requests current CPU frequency\n");
 
-	/*
-	 * Call clk_get_rate() on the mpu_ck.
-	 */
-
-	return 0;
+	return rate / 1000;
 }
 
 /*
@@ -575,10 +741,10 @@ int __init omap_pm_if_early_init()
 	return 0;
 }
 
-/* Must be called after clock framework is initialized */
 int __init omap_pm_if_init(void)
 {
 	int ret;
+
 	ret = omap_tput_list_init(&bus_tput);
 	if (ret)
 		pr_err("Failed to initialize interconnect"
@@ -586,15 +752,19 @@ int __init omap_pm_if_init(void)
 
 	ret = omap_tput_list_init(&mpu_tput);
 	if (ret)
-		pr_err("Failed to initialize mpu"
-			" frequency users list\n");
+		pr_err("Failed to initialize mpu frequency users list\n");
 
 	return ret;
 }
-
 void omap_pm_if_exit(void)
 {
 	/* Deallocate CPUFreq frequency table here */
+#ifdef CONFIG_BRIDGE_DVFS
+	if (dsp_freq_table)
+		opp_exit_cpufreq_table(&dsp_freq_table);
+#endif
+	if (mpu_freq_table)
+		opp_exit_cpufreq_table(&mpu_freq_table);
 }
 
 int omap_pm_set_min_mpu_freq(struct device *dev, unsigned long f)
