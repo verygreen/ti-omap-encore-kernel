@@ -49,7 +49,7 @@
 #define LCD_PIXCLOCK_MAX	52000 /* Maximum is 52MHz */
 
 /* Current Pixel clock */
-#define LCD_PIXEL_CLOCK		48000
+#define LCD_PIXEL_CLOCK		68000
 
 static struct workqueue_struct *boxer_panel_wq;
 static struct omap_dss_device *boxer_panel_dssdev;
