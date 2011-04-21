@@ -105,7 +105,6 @@
 #include <linux/bootmem.h>
 #endif
 
- 
 #define DEFAULT_BACKLIGHT_BRIGHTNESS 105
 
 #ifdef CONFIG_TOUCHSCREEN_CYTTSP_I2C
@@ -129,21 +128,22 @@
 #define BOXER_EXT_QUART_VIRT	0xfa000000
 #define BOXER_EXT_QUART_SIZE	SZ_256
 
+#define ENCORE_WL1271_NSHUTDOWN_GPIO	60
+
 #ifdef CONFIG_WL127X_RFKILL
-#if 0
-static struct wl127x_rfkill_platform_data wl127x_plat_data = {
-	.bt_nshutdown_gpio = 109,	/* UART_GPIO (spare) Enable GPIO */
-	.fm_enable_gpio = 161,		/* FM Enable GPIO */
+
+static struct wl127x_rfkill_platform_data encore_wl127x_pdata = {
+	.bt_nshutdown_gpio = ENCORE_WL1271_NSHUTDOWN_GPIO,	/* UART_GPIO (spare) Enable GPIO */
+	.fm_enable_gpio = -1,		/* FM Enable GPIO */
 };
 
-static struct platform_device boxer_wl127x_device = {
+static struct platform_device encore_wl127x_device = {
 	.name           = "wl127x-rfkill",
 	.id             = -1,
-	.dev.platform_data = &wl127x_plat_data,
+	.dev.platform_data = &encore_wl127x_pdata,
 };
-#endif
-#endif
 
+#endif
 
 static int boxer_twl4030_keymap[] = {
 	KEY(0, 0, KEY_HOME),
@@ -561,7 +561,7 @@ static struct platform_device *boxer_devices[] __initdata = {
 	&boxer_backlight_led_device,
 	&boxer_keys_gpio,
 #ifdef CONFIG_WL127X_RFKILL
-//	&boxer_wl127x_device,
+	&encore_wl127x_device,
 #endif
 	&boxer_vout_device,
 #ifdef CONFIG_CHARGER_MAX8903
@@ -1310,7 +1310,6 @@ fail:
 	return ret;
 }
 #endif
-
 #ifdef CONFIG_OMAP_MUX
 static struct omap_board_mux board_mux[] __initdata = {
 	{ .reg_offset = OMAP_MUX_TERMINATOR },
@@ -1354,8 +1353,6 @@ static void __init omap_boxer_init(void)
 #endif
 	boxer_backlight_init();
 
-	/* Bluetooth pin */
-	omap_mux_init_gpio(60, OMAP_PIN_OUTPUT);
 #if defined(CONFIG_USB_ANDROID) || defined(CONFIG_USB_ANDROID_MODULE)
 	platform_device_register(&usb_mass_storage_device);
 	// Set the device serial number passed in from the bootloader.
