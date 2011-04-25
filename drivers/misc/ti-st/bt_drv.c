@@ -400,7 +400,7 @@ static int hci_st_register_dev(struct hci_st *hst)
 	BT_DRV_DBG(" HCI device allocated. hdev= %p", hdev);
 
 	hst->hdev = hdev;
-	hdev->type = HCI_UART;
+	hdev->bus = HCI_UART;
 	hdev->driver_data = hst;
 	hdev->open = hci_st_open;
 	hdev->close = hci_st_close;

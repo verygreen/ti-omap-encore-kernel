@@ -88,6 +88,10 @@
 #include <linux/wl127x-rfkill.h>
 #endif
 
+#ifdef CONFIG_BT_WILINK
+#include <linux/ti_wilink_st.h>
+#endif
+
 #ifdef CONFIG_ANDROID_RAM_CONSOLE
 #include <linux/bootmem.h>
 #endif
@@ -113,7 +117,6 @@
 #define ENCORE_WL1271_NSHUTDOWN_GPIO	60
 
 #ifdef CONFIG_WL127X_RFKILL
-
 static struct wl127x_rfkill_platform_data encore_wl127x_pdata = {
 	.bt_nshutdown_gpio = ENCORE_WL1271_NSHUTDOWN_GPIO,	/* UART_GPIO (spare) Enable GPIO */
 	.fm_enable_gpio = -1,		/* FM Enable GPIO */
@@ -126,6 +129,32 @@ static struct platform_device encore_wl127x_device = {
 };
 
 #endif
+
+#ifdef CONFIG_TI_ST
+/* wl128x BT, FM, GPS connectivity chip */
+struct ti_st_plat_data wilink_pdata = {
+        .nshutdown_gpio = 60,
+        .dev_name = "/dev/ttyO1",
+        .flow_cntrl = 1,
+        .baud_rate = 115200 // was 3000000,
+};
+
+static struct platform_device kim_wl127x_device = {
+        .name           = "kim",
+        .id             = -1,
+        .dev.platform_data = &wilink_pdata,
+};
+
+#endif
+#ifdef CONFIG_BT_WILINK
+
+static struct platform_device btwilink_device = {
+       .name = "btwilink",
+       .id = -1,
+};
+
+#endif
+
 
 static int boxer_twl4030_keymap[] = {
 	KEY(0, 0, KEY_HOME),
@@ -245,7 +274,7 @@ static struct platform_device *boxer_devices[] __initdata = {
     &boxer_lcd_touch_regulator_device,    
 	&boxer_keys_gpio,
 #ifdef CONFIG_WL127X_RFKILL
-	&encore_wl127x_device,
+//	&encore_wl127x_device,
 #endif
 #ifdef CONFIG_CHARGER_MAX8903
 	&max8903_charger_device,
@@ -851,6 +880,15 @@ static void __init omap_encore_init(void)
 #if defined(CONFIG_USB_ANDROID_MASS_STORAGE)
 	platform_device_register(&usb_mass_storage_device);
 #endif
+#endif
+
+#ifdef CONFIG_TI_ST
+	printk("encore: registering wl127x device.\n");
+        platform_device_register(&kim_wl127x_device);
+#endif
+#ifdef CONFIG_BT_WILINK
+	printk("encore: registering btwilink device.\n");
+        platform_device_register(&btwilink_device);
 #endif
         BUG_ON(!cpu_is_omap3630());
 }

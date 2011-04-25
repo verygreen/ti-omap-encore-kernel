@@ -70,7 +70,8 @@ struct hci_dev {
 	char		name[8];
 	unsigned long	flags;
 	__u16		id;
-	__u8		type;
+	__u8		bus;
+	__u8		dev_type;
 	bdaddr_t	bdaddr;
 	__u8		dev_name[248];
 	__u8		dev_class[3];
@@ -106,6 +107,8 @@ struct hci_dev {
 	unsigned long	acl_last_tx;
 	unsigned long	sco_last_tx;
 
+	struct workqueue_struct *workqueue;
+
 	struct tasklet_struct	cmd_task;
 	struct tasklet_struct	rx_task;
 	struct tasklet_struct	tx_task;
@@ -133,6 +136,8 @@ struct hci_dev {
 	void			*core_data;
 
 	atomic_t 		promisc;
+
+        struct dentry           *debugfs;
 
 	struct device		*parent;
 	struct device		dev;
