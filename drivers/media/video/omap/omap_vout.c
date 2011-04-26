@@ -3263,13 +3263,20 @@ static int vidioc_s_fbuf(struct file *file, void *fh,
 	/* OMAP DSS doesn't support Source and Destination color
 	   key together */
 	if ((a->flags & V4L2_FBUF_FLAG_SRC_CHROMAKEY) &&
-			(a->flags & V4L2_FBUF_FLAG_CHROMAKEY))
+			(a->flags & V4L2_FBUF_FLAG_CHROMAKEY)) {
+		printk(KERN_ERR "Invalid request - "
+			"Both source & destination color key are set.\n");
 		return -EINVAL;
+	}
+
 	/* OMAP DSS Doesn't support the Destination color key
 	   and alpha blending together */
 	if ((a->flags & V4L2_FBUF_FLAG_CHROMAKEY) &&
-			(a->flags & V4L2_FBUF_FLAG_LOCAL_ALPHA))
+			(a->flags & V4L2_FBUF_FLAG_LOCAL_ALPHA)) {
+		printk(KERN_ERR "Invalid request - "
+			"Color key & Local Alpha are requested together.\n");
 		return -EINVAL;
+	}
 
 	if ((a->flags & V4L2_FBUF_FLAG_SRC_CHROMAKEY)) {
 		vout->fbuf.flags |= V4L2_FBUF_FLAG_SRC_CHROMAKEY;
@@ -3335,9 +3342,11 @@ static int vidioc_g_fbuf(struct file *file, void *fh,
 	if (ovl->manager && ovl->manager->get_manager_info) {
 		ovl->manager->get_manager_info(ovl->manager, &info);
 		if (info.trans_key_type == OMAP_DSS_COLOR_KEY_VID_SRC)
-			a->flags |= V4L2_FBUF_FLAG_SRC_CHROMAKEY;
+			if (info.trans_enabled)
+				a->flags |= V4L2_FBUF_FLAG_SRC_CHROMAKEY;
 		if (info.trans_key_type == OMAP_DSS_COLOR_KEY_GFX_DST)
-			a->flags |= V4L2_FBUF_FLAG_CHROMAKEY;
+			if (info.trans_enabled)
+				a->flags |= V4L2_FBUF_FLAG_CHROMAKEY;
 	}
 	if (ovl->manager && ovl->manager->get_manager_info) {
 		ovl->manager->get_manager_info(ovl->manager, &info);
