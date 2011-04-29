@@ -425,11 +425,9 @@ dac3100_put_EQ_Select (struct snd_kcontrol *kcontrol,
 	   dprintk ("Can not write register address\n");
       }
       /* Read the Value of the Page 8 Register 1 which controls the Adaptive Switching Mode */
-      /*
-      if (codec->hw_read (codec->control_data, &value[0], 1) != 1) {
+      if (i2c_master_recv(codec->control_data, &value[0], 1) != 1) {
 	   printk ("Can not read codec registers\n");
-      }*/
-      value[0] = codec->hw_read(codec->control_data, 1);
+      }
 
       /* Write the Register bit updates for Adaptive Filtering */
       value[1] = value[0] | 1;

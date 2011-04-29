@@ -1,5 +1,5 @@
 /*
- * omap3edp-dac3100.c - SoC audio for OMAP36xx EVT Board
+ * omap3evm-dac3100.c - SoC audio for OMAP3530 EVM.
  * 
  * Copyright (C) 2010 Mistral Solutions
  *
@@ -26,8 +26,7 @@
  *
  * Inital code : May 7, 2009 :	Sandeep S Prabhu 
  * 					<sandeepsp@mistralsolutions.com>
- *
- *		 June 20, 2010  Updated for EVT Platform
+ * Revision 0.1         01 Dec 2010         Updated the code-base for 2.6.32 Kernel
  *
  */
 
@@ -36,8 +35,10 @@
 #include <linux/soundcard.h>
 #include <linux/clk.h>
 #include <linux/cdev.h>
-#include <linux/i2c/twl.h>
 #include <linux/delay.h>
+#include <linux/wakelock.h>
+
+#include <plat/omap-pm.h>
 
 #include <sound/core.h>
 #include <sound/pcm.h>
@@ -45,23 +46,21 @@
 #include <sound/soc-dapm.h>
 
 #include <asm/mach-types.h>
-#include <plat/mux.h>
 #include <mach/io.h>
 #include <asm/io.h>
 
 
-#include "../codecs/tlv320dac3100.h"
-
 #include "omap-pcm.h"
 #include "omap-mcbsp.h"
+#include "../codecs/tlv320dac3100.h"
 
+static struct wake_lock omap3edp_wakelock;
 static struct clk *sys_clkout2;
 static struct clk *clkout2_src_ck;
 static struct clk *sys_ck;
 
 struct clk *gpt11_fclk;
 EXPORT_SYMBOL_GPL(gpt11_fclk);
-
 
 #define CODEC_SYSCLK_FREQ	13000000lu
 
@@ -73,12 +72,11 @@ EXPORT_SYMBOL_GPL(gpt11_fclk);
 
 /*
  *----------------------------------------------------------------------------
- * Function : omap3edp_hw_params
- * Purpose  : This function is to intialize the inputs for the snd_soc_codec_dai
- *            
+ * Function : omap3evt_hw_params
+ * Purpose  : Machine Driver's hw_params call-back handler routine.
  *----------------------------------------------------------------------------
  */
-static int omap3edp_hw_params(struct snd_pcm_substream *substream,
+static int omap3evt_hw_params(struct snd_pcm_substream *substream,
 			      struct snd_pcm_hw_params *params)
 {
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
@@ -97,7 +95,7 @@ static int omap3edp_hw_params(struct snd_pcm_substream *substream,
 	
 	/* Set cpu DAI configuration */
 	err = cpu_dai->ops->set_fmt(cpu_dai,
-				       SND_SOC_DAIFMT_I2S_1PHASE  |
+				       SND_SOC_DAIFMT_I2S  |
 				       SND_SOC_DAIFMT_NB_NF |
 				       SND_SOC_DAIFMT_CBM_CFM);
 
@@ -115,111 +113,139 @@ static int omap3edp_hw_params(struct snd_pcm_substream *substream,
 	return err;
 }
 
+static int snd_hw_latency;
+extern void omap_dpll3_errat_wa(int disable);
+
 /*
  *----------------------------------------------------------------------------
- * Function : omap3edp_startup
- * Purpose  : This function is enable the SYS_CLKOUT2 signal
- *            
+ * Function : omap3evt_startup
+ * Purpose  : Machine Driver's startup routine.
  *----------------------------------------------------------------------------
  */
-static int omap3edp_startup(struct snd_pcm_substream *substream)
+static int omap3evt_startup(struct snd_pcm_substream *substream)
 {
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+
+	/*
+	 * Hold C2 as min latency constraint. Deeper states
+	 * MPU RET/OFF is overhead and consume more power than
+	 * savings.
+	 * snd_hw_latency check takes care of playback and capture
+	 * usecase.
+	 */
+	if (!snd_hw_latency++) {
+		omap_pm_set_max_mpu_wakeup_lat(rtd->socdev->dev, 18);
+		/*
+		 * As of now for MP3 playback case need to enable dpll3
+		 * autoidle part of dpll3 lock errata.
+		 * REVISIT: Remove this, Once the dpll3 lock errata is
+		 * updated with with a new workaround without impacting mp3 usecase.
+		 */
+		omap_dpll3_errat_wa(0);
+	}
+
+	wake_lock(&omap3edp_wakelock);	
 	return clk_enable(sys_clkout2);
 }
 
 /*
  *----------------------------------------------------------------------------
- * Function : omap3edp_shutdown
- * Purpose  : This function is shutdown the SYS_CLKOUT2 signal
- *            
+ * Function : omap3evt_shutdown
+ * Purpose  : Machine Driver's shutdown routine.
  *----------------------------------------------------------------------------
  */
-static void omap3edp_shutdown(struct snd_pcm_substream *substream)
+static void omap3evt_shutdown(struct snd_pcm_substream *substream)
 {
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+
 	clk_disable(sys_clkout2);
+	wake_unlock(&omap3edp_wakelock);
+
+	/* remove latency constraint */
+	snd_hw_latency--;
+	if (!snd_hw_latency) {
+		omap_pm_set_max_mpu_wakeup_lat(rtd->socdev->dev, -1);
+		omap_dpll3_errat_wa(1);
+	}
+
 }
 
-static struct snd_soc_ops omap3edp_ops = {
-	.startup = omap3edp_startup,
-	.hw_params = omap3edp_hw_params,
-	.shutdown = omap3edp_shutdown,
+/* Machine Driver's SOC OPS structure. */
+static struct snd_soc_ops omap3evt_ops = {
+	.startup = omap3evt_startup,
+	.hw_params = omap3evt_hw_params,
+	.shutdown = omap3evt_shutdown,
 };
 
 static const struct snd_soc_dapm_widget aic3111_dapm_widgets[] = {
 	SND_SOC_DAPM_HP("Headphone Jack", NULL),
-	SND_SOC_DAPM_LINE("Line In", NULL),
 	SND_SOC_DAPM_LINE("Ext Spk", NULL),
-	SND_SOC_DAPM_MIC("Mic", NULL),
 };
-
-
 
 /*
  *----------------------------------------------------------------------------
- * Function : omap3edp_dac3100_init
- * Purpose  : This function is to intialize the Machine Driver
- *            
+ * Function : omap3evt_dac3100_init
+ * Purpose  : Initialization routine.
  *----------------------------------------------------------------------------
  */
-static int omap3edp_dac3100_init(struct snd_soc_codec *codec)
+static int omap3evt_dac3100_init(struct snd_soc_codec *codec)
 {
 	return 0;
 }
 
-static struct snd_soc_dai_link omap3edp_dai = {
+static struct snd_soc_dai_link omap3evt_dai = {
 	.name = "TLV320DAC3100",
 	.stream_name = "DAC3100",
 	.codec_dai = &tlv320dac3100_dai,
-	.init = omap3edp_dac3100_init,
+	.init = omap3evt_dac3100_init,
 	.cpu_dai = &omap_mcbsp_dai[0],
-	.ops = &omap3edp_ops,
+	.ops = &omap3evt_ops,
 };
 
 
-static struct snd_soc_card snd_soc_card_omap3edp = {
+static struct snd_soc_card snd_soc_card_omap3evt = {
     .name = "OMAP3 EDP",
     .platform = &omap_soc_platform,
-    .dai_link = &omap3edp_dai,
+    .dai_link = &omap3evt_dai,
     .num_links = 1,
 };
 
-static struct snd_soc_device omap3edp_snd_devdata = {
-    .card = &snd_soc_card_omap3edp,
+static struct snd_soc_device omap3evt_snd_devdata = {
+    .card = &snd_soc_card_omap3evt,
     .codec_dev = &soc_codec_dev_dac3100,
 };
 
-static struct platform_device *omap3edp_snd_device;
+static struct platform_device *omap3evt_snd_device;
 
 /*
  *----------------------------------------------------------------------------
- * Function : omap3edp_init
- * Purpose  : This function is to intialize the Machine Driver
- *            
+ * Function : omap3evt_init
+ * Purpose  : Machine Driver's Initialization routine.
  *----------------------------------------------------------------------------
  */
-static int __init omap3edp_init(void)
+static int __init omap3evt_init(void)
 {
 	int ret = 0;
 	struct device *dev;
 
 	pr_debug("omap3epd-sound: Audio SoC init\n");
-	omap3edp_snd_device = platform_device_alloc("soc-audio", -1);
+	omap3evt_snd_device = platform_device_alloc("soc-audio", -1);
 
-	if (!omap3edp_snd_device)
+	if (!omap3evt_snd_device)
 		return -ENOMEM;
 
-	platform_set_drvdata(omap3edp_snd_device, &omap3edp_snd_devdata);
-	omap3edp_snd_devdata.dev = &omap3edp_snd_device->dev;
+	platform_set_drvdata(omap3evt_snd_device, &omap3evt_snd_devdata);
+	omap3evt_snd_devdata.dev = &omap3evt_snd_device->dev;
 
-	ret = platform_device_add(omap3edp_snd_device);
+	dev = &omap3evt_snd_device->dev;
 
+	/* Set McBSP2 as audio McBSP */
+	*(unsigned int *)omap3evt_dai.cpu_dai->private_data = MCBSP2_ID; /* McBSP2 */
+
+	ret = platform_device_add(omap3evt_snd_device);
 	if (ret)
 		goto err1;
 
-	dev = &omap3edp_snd_device->dev;
-
-	/* Set McBSP2 as audio McBSP */
-	*(unsigned int *)omap3edp_dai.cpu_dai->private_data = MCBSP2_ID; /* McBSP2 */
 
 	clkout2_src_ck = clk_get(dev, "clkout2_src_ck");
 	if (IS_ERR(clkout2_src_ck)) {
@@ -260,7 +286,7 @@ static int __init omap3edp_init(void)
 							CODEC_SYSCLK_FREQ);
 		goto err5;
 	}
-	
+
 	gpt11_fclk = clk_get(dev, "gpt11_fck");
 	if (IS_ERR(gpt11_fclk)) {
 		dev_err(dev, "Could not get gpt11_fclk\n");
@@ -268,20 +294,20 @@ static int __init omap3edp_init(void)
 		goto err6;
 	}
 		
-    ret=clk_set_parent(gpt11_fclk, sys_ck);
+	ret=clk_set_parent(gpt11_fclk, sys_ck);
 	if (ret) {
 		dev_err(dev, "Could not set sys_clkout2's parent to gpt11_fclk\n");
 		goto err6;
 	}
 
-
+	wake_lock_init(&omap3edp_wakelock, WAKE_LOCK_SUSPEND, "omap3-dac3100");
 
 	dev_dbg(dev, "sys_ck = %lu\n", clk_get_rate(sys_ck));
 	dev_dbg(dev, "clkout2_src_ck = %lu\n", clk_get_rate(clkout2_src_ck));
 	dev_dbg(dev, "sys_clkout2 = %lu\n", clk_get_rate(sys_clkout2));
 
 	return 0;
-	
+
 err6:
 	clk_put(gpt11_fclk);
 err5:
@@ -291,33 +317,34 @@ err4:
 err3:
 	clk_put(clkout2_src_ck);
 err2:
-	platform_device_del(omap3edp_snd_device);
+	platform_device_del(omap3evt_snd_device);
 err1:
-	platform_device_put(omap3edp_snd_device);
+	platform_device_put(omap3evt_snd_device);
 
 	return ret;
 }
 
 /*
  *----------------------------------------------------------------------------
- * Function : omap3edp_exit
- * Purpose  : This function is to shutdown the Machine Driver
- *            
+ * Function : omap3evt_exit
+ * Purpose  : Machine Driver's Shutdown routine.
  *----------------------------------------------------------------------------
  */
-static void __exit omap3edp_exit(void)
+static void __exit omap3evt_exit(void)
 {
 	clk_put(clkout2_src_ck);
 	clk_put(sys_clkout2);
-
 	clk_put(sys_ck);
 
   	clk_put(gpt11_fclk);
-	platform_device_unregister(omap3edp_snd_device);
+
+	wake_lock_destroy(&omap3edp_wakelock);
+
+	platform_device_unregister(omap3evt_snd_device);
 }
 
-module_init(omap3edp_init);
-module_exit(omap3edp_exit);
+module_init(omap3evt_init);
+module_exit(omap3evt_exit);
 
 MODULE_AUTHOR("Sandeep S Prabhu<sandeepsp@mistralsolutions.com>");
 MODULE_DESCRIPTION("ALSA SoC OMAP3530 EVM");

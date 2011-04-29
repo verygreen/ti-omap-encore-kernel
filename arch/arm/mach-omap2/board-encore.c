@@ -1094,12 +1094,12 @@ static struct i2c_board_info __initdata boxer_i2c_bus1_info[] = {
 #endif /* CONFIG_MAX9635 */
 };
 
-#if defined(CONFIG_SND_SOC_DAC3100) || defined(CONFIG_SND_SOC_DAC3100_MODULE) || defined (CONFIG_SND_OMAP_SOC_OMAP3_EDP)
+#if defined(CONFIG_SND_SOC_TLV320DAC3100) || defined(CONFIG_SND_SOC_TLV320DAC3100_MODULE)
 #define AUDIO_CODEC_POWER_ENABLE_GPIO    103
 #define AUDIO_CODEC_RESET_GPIO           37
 #define AUDIO_CODEC_IRQ_GPIO             59
-#define AIC3100_NAME "tlv320dac3100"
-#define AIC3100_I2CSLAVEADDRESS 0x18
+#define AIC3100_NAME			"tlv320dac3100"
+#define AIC3100_I2CSLAVEADDRESS		0x18
 
 static void audio_dac_3100_dev_init(void)
 {
@@ -1118,10 +1118,6 @@ static void audio_dac_3100_dev_init(void)
                 printk(KERN_ERR "can't get AUDIO_CODEC_POWER_ENABLE_GPIO \n");
                 return;
         }
-//// 2.7 merge conflict 
-//        printk("board-encore.c: audio_dac_3100_dev_init > set AUDIO_CODEC_RESET_GPIO to output High!\n");
-//       gpio_direction_output(AUDIO_CODEC_RESET_GPIO, 0);
-//// 2.7 merge conflict
 
         printk("board-encore.c: audio_dac_3100_dev_init > set AUDIO_CODEC_POWER_ENABLE_GPIO to output and value high!\n");
         gpio_direction_output(AUDIO_CODEC_POWER_ENABLE_GPIO, 0);
@@ -1144,7 +1140,7 @@ static struct i2c_board_info __initdata boxer_i2c_bus2_info[] = {
 	},
 #endif
 
-#if defined(CONFIG_SND_SOC_DAC3100) || defined(CONFIG_SND_SOC_DAC3100_MODULE)  || defined (CONFIG_SND_OMAP_SOC_OMAP3_EDP)
+#if defined(CONFIG_SND_SOC_TLV320DAC3100) || defined(CONFIG_SND_SOC_TLV320DAC310_MODULE)
 	{
 		I2C_BOARD_INFO(AIC3100_NAME,  AIC3100_I2CSLAVEADDRESS),
                 .irq = OMAP_GPIO_IRQ(AUDIO_CODEC_IRQ_GPIO),
@@ -1276,7 +1272,7 @@ static void __init omap_boxer_init(void)
 	max17042_dev_init();
 #endif
 
-#if defined(CONFIG_SND_SOC_DAC3100) || defined(CONFIG_SND_SOC_DAC3100_MODULE) || defined(CONFIG_SND_OMAP_SOC_OMAP3_EDP)
+#if defined(CONFIG_SND_SOC_TLV320DAC3100) || defined(CONFIG_SND_SOC_TLV320DAC310_MODULE)
         audio_dac_3100_dev_init();
 #endif
 	boxer_backlight_init();

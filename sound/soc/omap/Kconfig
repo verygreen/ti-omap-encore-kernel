@@ -127,12 +127,11 @@ config SND_OMAP_SOC_ZOOM2
 	help
 	  Say Y if you want to add support for Soc audio on Zoom2 board.
 
-
-config SND_OMAP_SOC_DAC3100
-	tristate "SoC DAC3100 Audio support"
-	depends on SND_OMAP_SOC
+config SND_OMAP_SOC_OMAP3EVT_DAC3100
+	tristate "SoC Audio support for Nook Color (TLV320DAC3100 codec)"
+	depends on SND_OMAP_SOC && MACH_ENCORE
 	select SND_OMAP_SOC_MCBSP
-	select SND_SOC_DAC3100
+	select SND_SOC_TLV320DAC3100
 	help
-	  Say Y if you want to add support for DAC3100 Soc audio.
-
+	  Say Y if you want to add support for tlv320dac3100 Soc Audio on
+	  Encore (B&N Nook Color) board.

@@ -21,7 +21,7 @@ snd-soc-sdp4430-objs := sdp4430.o
 snd-soc-omap3pandora-objs := omap3pandora.o
 snd-soc-omap3beagle-objs := omap3beagle.o
 snd-soc-zoom2-objs := zoom2.o
-snd-soc-dac3100-objs := omap3evm-dac3100.o
+snd-soc-omap3evt-dac3100-objs := omap3evt-dac3100.o
 
 obj-$(CONFIG_SND_OMAP_SOC_N810) += snd-soc-n810.o
 obj-$(CONFIG_SND_OMAP_SOC_AMS_DELTA) += snd-soc-ams-delta.o
@@ -34,5 +34,4 @@ obj-$(CONFIG_SND_OMAP_SOC_SDP4430) += snd-soc-sdp4430.o
 obj-$(CONFIG_SND_OMAP_SOC_OMAP3_PANDORA) += snd-soc-omap3pandora.o
 obj-$(CONFIG_SND_OMAP_SOC_OMAP3_BEAGLE) += snd-soc-omap3beagle.o
 obj-$(CONFIG_SND_OMAP_SOC_ZOOM2) += snd-soc-zoom2.o
-obj-$(CONFIG_SND_OMAP_SOC_DAC3100) += snd-soc-dac3100.o
-
+obj-$(CONFIG_SND_OMAP_SOC_OMAP3EVT_DAC3100) +=snd-soc-omap3evt-dac3100.o
