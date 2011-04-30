@@ -685,6 +685,9 @@ omap_i2c_xfer(struct i2c_adapter *adap, struct i2c_msg msgs[], int num)
 
 	if (r == 0)
 		r = num;
+
+	omap_i2c_wait_for_bb(dev);
+
 out:
 	disable_irq_nosync(dev->irq);
 	omap_i2c_idle(dev);
@@ -822,26 +825,41 @@ complete:
 		if (stat & (OMAP_I2C_STAT_RRDY | OMAP_I2C_STAT_RDR)) {
 			u8 num_bytes = 1;
 
-			/* Errata ID:i207 (Errata Nos. OMAP2: 1.67, OMAP3: 1.8)
+			/*
+			 * I2C Errata(Errata Nos. OMAP2: 1.67, OMAP3: 1.8)
 			 * Not applicable for OMAP4.
 			 * Under certain rare conditions, RDR could be set again
 			 * when the bus is busy, then ignore the interrupt and
 			 * clear the interrupt.
 			 */
+			if ((stat & OMAP_I2C_STAT_RDR) && !cpu_is_omap44xx()) {
+				/* Step 1: If RDR is set, clear it */
+				omap_i2c_ack_stat(dev, stat & OMAP_I2C_STAT_RDR);
 
-			if (cpu_is_omap2430() || cpu_is_omap34xx()) {
-				u8 stat2 = 0;
-				stat2 = omap_i2c_read_reg(dev, OMAP_I2C_STAT_REG);
-				if (stat2 & OMAP_I2C_STAT_BB) {
-					omap_i2c_ack_stat(dev, OMAP_I2C_STAT_RDR);
-					return IRQ_HANDLED;
+				/* Step 2: */
+				if(!(omap_i2c_read_reg(dev, OMAP_I2C_STAT_REG)
+							& OMAP_I2C_STAT_BB)) {
+					/* Step 3: */
+					while(omap_i2c_read_reg(dev,
+						OMAP_I2C_STAT_REG)
+							& OMAP_I2C_STAT_RDR) {
+						omap_i2c_ack_stat(dev, stat
+							& OMAP_I2C_STAT_RDR);
+/* XXX green. This is too noisy on encore
+						dev_err(dev->dev,
+						"I2C : RDR when the bus is busy.\n");
+*/
+						continue;
+					}
+
 				}
+				else
+					return IRQ_HANDLED;
 			}
-
 			if (dev->fifo_size) {
 				if (stat & OMAP_I2C_STAT_RRDY)
 					num_bytes = dev->fifo_size;
-				else    /* read RXSTAT on RDR interrupt */
+				else  /* Step4: read RXSTAT on RDR interrupt */
 					num_bytes = (omap_i2c_read_reg(dev,
 							OMAP_I2C_BUFSTAT_REG)
 							>> 8) & 0x3F;
