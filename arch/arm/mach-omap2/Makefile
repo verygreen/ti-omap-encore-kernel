@@ -104,7 +104,7 @@ obj-$(CONFIG_MACH_OMAP_LDP)		+= board-ldp.o \
 obj-$(CONFIG_MACH_ENCORE)		+= board-encore.o \
 					   mmc-twl4030.o \
 					   twl4030.o \
-					   board-boxer-wifi.o
+					   board-evt-wifi.o
 obj-$(CONFIG_MACH_OVERO)		+= board-overo.o \
 					   mmc-twl4030.o
 obj-$(CONFIG_MACH_OMAP3EVM)		+= board-omap3evm.o \

@@ -223,7 +223,7 @@ config OMAP3_SDRC_AC_TIMING
 
 choice
 	bool "FlexST support"
-	depends on MACH_OMAP_ZOOM2 || MACH_OMAP_ZOOM3 || MACH_OMAP_4430SDP
+	depends on MACH_OMAP_ZOOM2 || MACH_OMAP_ZOOM3 || MACH_OMAP_4430SDP || MACH_ENCORE
 	default MACH_OMAP_FST_128x
 	help
 	  FlexST will simplify building images for OMAP3+WL127x, OMAP3+WL128x,
