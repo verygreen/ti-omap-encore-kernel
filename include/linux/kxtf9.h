@@ -1,5 +1,6 @@
 /*
- * Copyright (c) 2008-2009, Kionix, Inc. All Rights Reserved.
+ * Copyright (c) 2009, Kionix, Inc. All Rights Reserved.
+ * Written by Chris Hudson <chudson@kionix.com>
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -25,25 +26,7 @@
 #define aprintk(fmt, args...)
 #endif
 
-#include <linux/ioctl.h>  /* For IOCTL macros */
-
-/** This define controls compilation of the master device interface */
-/*#define KXTF9_MASTER_DEVICE*/
-
-#define KXTF9_IOCTL_BASE 77
-/** The following define the IOCTL command values via the ioctl macros */
-#define KXTF9_IOCTL_SET_DELAY		_IOW(KXTF9_IOCTL_BASE, 0, int)
-#define KXTF9_IOCTL_GET_DELAY		_IOR(KXTF9_IOCTL_BASE, 1, int)
-#define KXTF9_IOCTL_SET_ENABLE		_IOW(KXTF9_IOCTL_BASE, 2, int)
-#define KXTF9_IOCTL_GET_ENABLE		_IOR(KXTF9_IOCTL_BASE, 3, int)
-#define KXTF9_IOCTL_SET_G_RANGE		_IOW(KXTF9_IOCTL_BASE, 4, int)
-
-#define KXTF9_IOCTL_SET_TILT_ENABLE	_IOW(KXTF9_IOCTL_BASE, 5, int)
-#define KXTF9_IOCTL_SET_TAP_ENABLE	_IOW(KXTF9_IOCTL_BASE, 6, int)
-#define KXTF9_IOCTL_SET_WAKE_ENABLE	_IOW(KXTF9_IOCTL_BASE, 7, int)
-#define KXTF9_IOCTL_SET_PM_MODE		_IOW(KXTF9_IOCTL_BASE, 8, int)
-#define KXTF9_IOCTL_SELF_TEST		_IOW(KXTF9_IOCTL_BASE, 9, int)
-#define KXTF9_IOCTL_SET_SENSITIVITY     _IOW(KXTF9_IOCTL_BASE, 10, int)
+//#define KXTF9_I2C_SLAVE_ADDR	0x0F
 
 /* CONTROL REGISTER 1 BITS */
 #define RES_12BIT		0x40
@@ -75,15 +58,13 @@
 #define KXTF9_IEL		0x08	/* interrupt response */
 #define IEU			0x04	/* alternate unlatched response */
 /* DATA CONTROL REGISTER BITS */
-#define ODR800			0x06	/* lpf output ODR masks */
-#define ODR400			0x05
-#define ODR200			0x04
-#define ODR100			0x03
-#define ODR50			0x02
-#define ODR25			0x01
-#define ODR12_5			0x00
-
-#define SENSITIVITY_REGS 0x07
+#define ODR800F			0x06	/* lpf output ODR masks */
+#define ODR400F			0x05
+#define ODR200F			0x04
+#define ODR100F			0x03
+#define ODR50F			0x02
+#define ODR25F			0x01
+#define ODR12_5F		0x00
 
 #ifdef __KERNEL__
 struct kxtf9_platform_data {
@@ -122,13 +103,7 @@ struct kxtf9_platform_data {
 	int (*power_off)(void);
 
 	int gpio;
-
-	u8 gesture;
-	u8 sensitivity_low[SENSITIVITY_REGS];
-	u8 sensitivity_medium[SENSITIVITY_REGS];
-	u8 sensitivity_high[SENSITIVITY_REGS];
 };
-
 #endif /* __KERNEL__ */
 
 #endif  /* __KXTF9_H__ */

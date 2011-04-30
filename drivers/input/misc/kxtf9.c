@@ -88,13 +88,13 @@ struct {
 	u8 mask;
 } kxtf9_odr_table[] = {
 	{
-	3,	ODR800}, {
-	5,	ODR400}, {
-	10,	ODR200}, {
-	20,	ODR100}, {
-	40,	ODR50}, {
-	80,	ODR25}, {
-	0,	ODR12_5},
+	3,	ODR800F}, {
+	5,	ODR400F}, {
+	10,	ODR200F}, {
+	20,	ODR100F}, {
+	40,	ODR50F}, {
+	80,	ODR25F}, {
+	0,	ODR12_5F},
 };
 
 struct kxtf9_data {
@@ -865,8 +865,8 @@ static ssize_t kxtf9_abort_store(struct device *dev,
 
 	aprintk("kxtf9: kxtf9_abort_store ...\n");
 
-printk(KERN_ERR "FIXME: fix input_dev in kxtf9_abort_store\n");
-//	input_event(dev, EV_SYN, SYN_REPORT, -1);
+	if (tf9->input_dev)
+		input_event(tf9->input_dev, EV_SYN, SYN_REPORT, -1);
 
 	return count;
 }
