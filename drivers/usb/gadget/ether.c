@@ -24,7 +24,6 @@
 
 #include <linux/kernel.h>
 #include <linux/utsname.h>
-#include <linux/delay.h>
 
 #include "u_ether.h"
 
