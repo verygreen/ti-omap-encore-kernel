@@ -68,7 +68,7 @@
 /* CM_CLKSEL1_PLL bit settings */
 #define CORE_DPLL_CLKOUT_DIV_SHIFT	0x1b
 
-#ifdef CONFIG_FB_OMAP2_32_BPP
+#ifdef CONFIG_FB_OMAP2
 /* DSS registers */
 #define OMAP34XX_DISPC_BASE		0x48050400
 #define	DISPC_CTRL			0x040
@@ -147,7 +147,7 @@ skip_cs1_params:
 	mcr p15, 0, r10, c1, c0, 0	@ write aux ctrl register
 	dsb				@ flush buffered writes to interconnect
 	isb				@ prevent speculative exec past here
-#ifdef CONFIG_FB_OMAP2_32_BPP
+#ifdef CONFIG_FB_OMAP2
 	ldr	r11, omap3_cm_iclk_dss
 	ldr	r12, [r11]
 	and	r12, r12, #CM_DSS_ICLK_ST
@@ -350,7 +350,7 @@ core_m2_mask_val:
 	.word 0x07FFFFFF
 omap3_cm_iclk_dss:
 	.word OMAP34XX_CM_REGADDR(OMAP3430_DSS_MOD, CM_ICLKEN)
-#ifdef CONFIG_FB_OMAP2_32_BPP
+#ifdef CONFIG_FB_OMAP2
 omap3_dispc_ctrl:
 	.word DISPC_CONTROL_P
 omap3_dispc_irq_st:
