@@ -342,6 +342,8 @@ IS_OMAP_TYPE(3517, 0x3517)
 #define cpu_is_omap3430()		0
 #define cpu_is_omap4430()		0
 #define cpu_is_omap3630()		0
+#define cpu_is_omap3621()		0
+#define cpu_is_omap3622()		0
 
 /*
  * Whether we have MULTI_OMAP1 or not, we still need to distinguish
@@ -412,6 +414,13 @@ IS_OMAP_TYPE(3517, 0x3517)
 # define cpu_is_omap3517()		is_omap3517()
 # undef cpu_is_omap3630
 # define cpu_is_omap3630()		is_omap363x()
+#endif
+
+# if defined(CONFIG_ARCH_OMAP3621)
+# undef cpu_is_omap3621
+# undef cpu_is_omap3622
+# define cpu_is_omap3621()		is_omap363x()
+# define cpu_is_omap3622()		(cpu_is_omap3621() && omap3_has_isp2p())
 #endif
 
 # if defined(CONFIG_ARCH_OMAP4)
@@ -519,6 +528,7 @@ extern u32 omap3_features;
 #define OMAP3_HAS_NEON			BIT(3)
 #define OMAP3_HAS_ISP			BIT(4)
 #define OMAP3_HAS_192MHZ_CLK		BIT(5)
+#define OMAP3_HAS_ISP2P			BIT(6)
 
 #define OMAP3_HAS_FEATURE(feat,flag)			\
 static inline unsigned int omap3_has_ ##feat(void)	\
@@ -531,6 +541,7 @@ OMAP3_HAS_FEATURE(sgx, SGX)
 OMAP3_HAS_FEATURE(iva, IVA)
 OMAP3_HAS_FEATURE(neon, NEON)
 OMAP3_HAS_FEATURE(isp, ISP)
+OMAP3_HAS_FEATURE(isp2p, ISP2P)
 OMAP3_HAS_FEATURE(192mhz_clk, 192MHZ_CLK)
 
 #endif

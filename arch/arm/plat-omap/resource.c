@@ -106,15 +106,18 @@ static int update_resource_level(struct shared_resource *resp)
 {
 	struct users_list *user;
 	unsigned long target_level;
-	int ret;
+	int ret = 0;
 	int max_level;
 
+	mutex_lock(&resp->resource_mutex);
 	/* Regenerate the target_value for the resource */
 	if (resp->flags == RES_TYPE_VDD1_MAX) {
 		max_level = max_constraint = MAX_VDD1_OPP;
 		list_for_each_entry(user, &resp->users_list, node)
 			if (user->level < max_level)
 				max_constraint = user->level;
+
+		mutex_unlock(&resp->resource_mutex);
 
 		resp = resource_lookup("vdd1_opp");
 		ret = update_resource_level(resp);
@@ -139,9 +142,14 @@ static int update_resource_level(struct shared_resource *resp)
 			if (user->level < target_level)
 				target_level = user->level;
 	} else {
+		mutex_unlock(&resp->resource_mutex);
 		pr_debug("SRF: Unknown resource type\n");
 		return -EINVAL;
 	}
+	mutex_unlock(&resp->resource_mutex);
+
+	if (resp->curr_level == target_level)
+		return ret;
 
 	pr_debug("SRF: Changing Level for resource %s to %ld\n",
 				resp->name, target_level);
@@ -169,34 +177,39 @@ static struct users_list *get_user(void)
 	int ind = 0;
 	struct users_list *user;
 
+	/*
+	 * When allocating from the static pool, we must lock resource mutex,
+	 * to protect against concurrent get_user() calls.
+	 */
+	down(&res_mutex);
 	/* See if something available in the static pool */
 	while (ind < MAX_USERS) {
-		if (usr_list[ind].usage == UNUSED)
-			break;
-		else
-			ind++;
+		if (usr_list[ind].usage == UNUSED) {
+			/* Pick from the static pool */
+			user = &usr_list[ind];
+			user->usage = STATIC_ALLOC;
+			up(&res_mutex);
+			return user;
+		}
+		ind++;
 	}
-	if (ind < MAX_USERS) {
-		/* Pick from the static pool */
-		user = &usr_list[ind];
-		user->usage = STATIC_ALLOC;
-	} else {
-		/* By this time we hope slab is initialized */
-		if (slab_is_available()) {
-			user = kmalloc(sizeof(struct  users_list), GFP_KERNEL);
-			if (!user) {
-				printk(KERN_ERR "SRF:FATAL ERROR: kmalloc"
-							"failed\n");
-				return ERR_PTR(-ENOMEM);
-			}
-			user->usage = DYNAMIC_ALLOC;
-		} else {
-			/* Dynamic alloc not available yet */
-			printk(KERN_ERR "SRF: FATAL ERROR: users_list"
-				"initial POOL EMPTY before slab init\n");
+	up(&res_mutex);
+	/* By this time we hope slab is initialized */
+	if (slab_is_available()) {
+		user = kmalloc(sizeof(struct  users_list), GFP_KERNEL);
+		if (!user) {
+			printk(KERN_ERR "SRF:FATAL ERROR: kmalloc"
+					"failed\n");
 			return ERR_PTR(-ENOMEM);
 		}
+		user->usage = DYNAMIC_ALLOC;
+	} else {
+		/* Dynamic alloc not available yet */
+		printk(KERN_ERR "SRF: FATAL ERROR: users_list"
+				"initial POOL EMPTY before slab init\n");
+		return ERR_PTR(-ENOMEM);
 	}
+
 	return user;
 }
 
@@ -208,13 +221,17 @@ static struct users_list *get_user(void)
  * dynamically allocated, and if its from the static pool, marks it unused.
  * No return value.
  */
-void free_user(struct users_list *user)
+static void free_user(struct users_list *user)
 {
 	if (user->usage == DYNAMIC_ALLOC) {
 		kfree(user);
 	} else {
-		user->usage = UNUSED;
+		/*
+		 * It is not necesssary to lock when returning to the
+		 * static pool.
+		 */
 		user->dev = NULL;
+		user->usage = UNUSED;
 	}
 }
 
@@ -298,6 +315,7 @@ int resource_register(struct shared_resource *resp)
 	}
 
 	INIT_LIST_HEAD(&resp->users_list);
+	mutex_init(&resp->resource_mutex);
 
 	/* Add the resource to the resource list */
 	list_add(&resp->node, &res_list);
@@ -360,14 +378,13 @@ int resource_request(const char *name, struct device *dev,
 	struct  users_list *user;
 	int 	found = 0, ret = 0;
 
-	down(&res_mutex);
-	resp = _resource_lookup(name);
+	resp = resource_lookup(name);
 	if (!resp) {
 		printk(KERN_ERR "resource_request: Invalid resource name\n");
-		ret = -EINVAL;
-		goto res_unlock;
+		return -EINVAL;
 	}
 
+	mutex_lock(&resp->resource_mutex);
 	/* Call the resource specific validate function */
 	if (resp->ops->validate_level) {
 		ret = resp->ops->validate_level(resp, level);
@@ -396,7 +413,7 @@ int resource_request(const char *name, struct device *dev,
 	user->level = level;
 
 res_unlock:
-	up(&res_mutex);
+	mutex_unlock(&resp->resource_mutex);
 	/*
 	 * Recompute and set the current level for the resource.
 	 * NOTE: update_resource level moved out of spin_lock, as it may call
@@ -427,14 +444,13 @@ int resource_release(const char *name, struct device *dev)
 	struct users_list *user;
 	int found = 0, ret = 0;
 
-	down(&res_mutex);
-	resp = _resource_lookup(name);
+	resp = resource_lookup(name);
 	if (!resp) {
 		printk(KERN_ERR "resource_release: Invalid resource name\n");
-		ret = -EINVAL;
-		goto res_unlock;
+		return -EINVAL;
 	}
 
+	mutex_lock(&resp->resource_mutex);
 	list_for_each_entry(user, &resp->users_list, node) {
 		if (user->dev == dev) {
 			found = 1;
@@ -452,10 +468,12 @@ int resource_release(const char *name, struct device *dev)
 	list_del(&user->node);
 	free_user(user);
 
-	/* Recompute and set the current level for the resource */
-	ret = update_resource_level(resp);
 res_unlock:
-	up(&res_mutex);
+	mutex_unlock(&resp->resource_mutex);
+	/* Recompute and set the current level for the resource */
+	if (!ret)
+		ret = update_resource_level(resp);
+
 	return ret;
 }
 EXPORT_SYMBOL(resource_release);
@@ -479,7 +497,7 @@ int resource_get_level(const char *name)
 		up(&res_mutex);
 		return -EINVAL;
 	}
-	ret = resp->curr_level;
+	ret =  resp->curr_level;
 	up(&res_mutex);
 	return ret;
 }

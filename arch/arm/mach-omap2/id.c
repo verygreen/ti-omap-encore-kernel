@@ -179,6 +179,7 @@ void __init omap3_check_features(void)
 	OMAP3_CHECK_FEATURE(status, SGX);
 	OMAP3_CHECK_FEATURE(status, NEON);
 	OMAP3_CHECK_FEATURE(status, ISP);
+	OMAP3_CHECK_FEATURE(status, ISP2P);
 	if (cpu_is_omap3630())
 		omap3_features |= OMAP3_HAS_192MHZ_CLK;
 
@@ -264,7 +265,8 @@ void __init omap3_check_revision(void)
 			omap_revision = OMAP3630_REV_ES1_1;
 			break;
 		case 2:
-		/* Fall through */
+			omap_revision = OMAP3630_REV_ES1_2;
+			break;
 		default:
 			/* Use the latest known revision as default */
 			omap_revision = OMAP3630_REV_ES1_2;

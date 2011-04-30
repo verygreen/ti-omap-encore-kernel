@@ -381,7 +381,9 @@ void omap_pm_if_exit(void)
 
 u8 omap_pm_get_max_vdd1_opp()
 {
-	if (cpu_is_omap3630()) {
+	if (cpu_is_omap3621()) {
+		return VDD1_OPP3;
+	} else if (cpu_is_omap3630()) {
 		/*
 		 * Check if VDD1 OPP5 has the right fused value, if 0
 		 * then 1.2G is not supported.

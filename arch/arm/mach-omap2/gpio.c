@@ -1416,9 +1416,10 @@ static int __devinit omap_gpio_probe(struct platform_device *pdev)
 					OMAP24XX_GPIO_IRQENABLE1);
 		__raw_writel(0xffffffff, bank->base +
 					OMAP24XX_GPIO_IRQSTATUS1);
+		__raw_writel(0x0015, bank->base +
+					OMAP24XX_GPIO_SYSCONFIG);
 		__raw_writel(0x00000000, bank->base +
 					OMAP24XX_GPIO_DEBOUNCE_EN);
-
 		/* Initialize interface clk ungated, module enabled */
 		__raw_writel(0, bank->base + OMAP24XX_GPIO_CTRL);
 	}
