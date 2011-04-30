@@ -49,6 +49,7 @@
 #include <linux/regulator/fixed.h>
 #include <linux/switch.h>
 #include <linux/dma-mapping.h>
+#include <linux/mmc/host.h>
 #include <mach/hardware.h>
 #include <asm/mach-types.h>
 #include <asm/mach/arch.h>
@@ -60,9 +61,6 @@
 #include <plat/board.h>
 #include <plat/common.h>
 #include <plat/gpmc.h>
-#if 0
-#include <mach/hsmmc.h>
-#endif
 #include <plat/usb.h>
 #include <plat/mux.h>
 #include "mux.h"
@@ -404,11 +402,6 @@ static struct regulator_consumer_supply boxer_vdda_dac_supply = {
 	.dev		= &boxer_dss_device.dev,
 };
 
-static struct regulator_consumer_supply boxer_vdds_dsi_supply = {
-	.supply		= "vdds_dsi",
-	.dev		= &boxer_dss_device.dev,
-};
-
 #ifdef CONFIG_FB_OMAP2
 static struct resource boxer_vout_resource[2] = { };
 //static struct resource boxer_vout_resource[3 - CONFIG_FB_OMAP2_NUM_FBS] = {
@@ -582,14 +575,6 @@ static struct regulator_consumer_supply boxer_vmmc1_supply = {
 	.supply		= "vmmc",
 };
 
-static struct regulator_consumer_supply boxer_vsim_supply = {
-	.supply		= "vmmc_aux",
-};
-
-static struct regulator_consumer_supply boxer_vmmc2_supply = {
-	.supply		= "vmmc",
-};
-
 /* VMMC1 for OMAP VDD_MMC1 (i/o) and MMC1 card */
 static struct regulator_init_data boxer_vmmc1 = {
 	.constraints = {
@@ -605,36 +590,6 @@ static struct regulator_init_data boxer_vmmc1 = {
 	.consumer_supplies      = &boxer_vmmc1_supply,
 };
 
-/* VMMC2 for MMC2 card */
-static struct regulator_init_data boxer_vmmc2 = {
-	.constraints = {
-		.min_uV			= 1850000,
-		.max_uV			= 1850000,
-		.apply_uV		= true,
-		.valid_modes_mask	= REGULATOR_MODE_NORMAL
-					| REGULATOR_MODE_STANDBY,
-		.valid_ops_mask		= REGULATOR_CHANGE_MODE
-					| REGULATOR_CHANGE_STATUS,
-	},
-	.num_consumer_supplies  = 1,
-	.consumer_supplies      = &boxer_vmmc2_supply,
-};
-
-/* VSIM for OMAP VDD_MMC1A (i/o for DAT4..DAT7) */
-static struct regulator_init_data boxer_vsim = {
-	.constraints = {
-		.min_uV			= 1800000,
-		.max_uV			= 3000000,
-		.valid_modes_mask	= REGULATOR_MODE_NORMAL
-					| REGULATOR_MODE_STANDBY,
-		.valid_ops_mask		= REGULATOR_CHANGE_VOLTAGE
-					| REGULATOR_CHANGE_MODE
-					| REGULATOR_CHANGE_STATUS,
-	},
-	.num_consumer_supplies  = 1,
-	.consumer_supplies      = &boxer_vsim_supply,
-};
-
 static struct regulator_init_data boxer_vdac = {
 	.constraints = {
 		.min_uV                 = 1800000,
@@ -648,32 +603,24 @@ static struct regulator_init_data boxer_vdac = {
 	.consumer_supplies      = &boxer_vdda_dac_supply,
 };
 
-static struct regulator_init_data boxer_vdsi = {
-	.constraints = {
-		.min_uV                 = 1800000,
-		.max_uV                 = 1800000,
-		.valid_modes_mask       = REGULATOR_MODE_NORMAL
-					| REGULATOR_MODE_STANDBY,
-		.valid_ops_mask         = REGULATOR_CHANGE_MODE
-					| REGULATOR_CHANGE_STATUS,
-	},
-	.num_consumer_supplies  = 1,
-	.consumer_supplies      = &boxer_vdds_dsi_supply,
-};
-
 static struct twl4030_hsmmc_info mmc[] __initdata = {
 	{
+		.name		= "external",
 		.mmc		= 1,
 		.wires		= 4,
 		.gpio_wp	= -EINVAL,
 		.gpio_cd	= -EINVAL,
+		.power_saving	= 1,
 	},
 	{
+		.name		= "internal",
 		.mmc		= 2,
 		.wires		= 8,
 		.gpio_wp	= -EINVAL,
 		.gpio_cd	= -EINVAL,
 		.nonremovable	= 1,
+		.power_saving	= 1,
+		.ocr_mask	= MMC_VDD_165_195,
 	},
 	{
 		.mmc		= 3,
@@ -690,7 +637,6 @@ static int __ref boxer_twl_gpio_setup(struct device *dev,
 	/* gpio + 0 is "mmc0_cd" (input/IRQ),
 	 * gpio + 1 is "mmc1_cd" (input/IRQ)
 	 */
-    printk("******IN boxer_twl_gpio_setup********\n");
 	mmc[0].gpio_cd = gpio + 0;
 	mmc[1].gpio_cd = gpio + 1;
 	twl4030_mmc_init(mmc);
@@ -699,8 +645,6 @@ static int __ref boxer_twl_gpio_setup(struct device *dev,
 	 * regulators will be set up only *after* we return.
 	*/
 	boxer_vmmc1_supply.dev = mmc[0].dev;
-	boxer_vsim_supply.dev = mmc[0].dev;
-	boxer_vmmc2_supply.dev = mmc[1].dev;
 
 	return 0;
 }
@@ -840,10 +784,7 @@ static struct twl4030_platform_data __refdata boxer_twldata = {
 	.keypad		= &boxer_kp_twl4030_data,
 	.power		= &boxer_t2scripts_data,
 	.vmmc1          = &boxer_vmmc1,
-	.vmmc2          = &boxer_vmmc2,
-	.vsim           = &boxer_vsim,
 	.vdac		= &boxer_vdac,
-	.vpll2		= &boxer_vdsi,
 };
 
 

@@ -1334,7 +1334,7 @@ int dsi_pll_init(enum dsi lcd_ix, struct omap_dss_device *dssdev,
 	enable_clocks(1);
 	dsi_enable_pll_clock(lcd_ix, 1);
 
-	if (!cpu_is_omap44xx()) {
+	if (!cpu_is_omap44xx() && !twl_rev_is_tps65921()) {
 		r = regulator_enable(p_dsi->vdds_dsi_reg);
 		if (r)
 			goto err0;
@@ -1380,7 +1380,7 @@ int dsi_pll_init(enum dsi lcd_ix, struct omap_dss_device *dssdev,
 
 err1:
 
-	if (!cpu_is_omap44xx())
+	if (!cpu_is_omap44xx() && !twl_rev_is_tps65921())
 		regulator_disable(p_dsi->vdds_dsi_reg);
 
 err0:
@@ -1399,7 +1399,7 @@ void dsi_pll_uninit(enum dsi lcd_ix)
 	p_dsi->pll_locked = 0;
 	dsi_pll_power(lcd_ix, DSI_PLL_POWER_OFF);
 
-	if (!cpu_is_omap44xx())
+	if (!cpu_is_omap44xx() && !twl_rev_is_tps65921())
 		regulator_disable(p_dsi->vdds_dsi_reg);
 
 	DSSDBG("PLL uninit done\n");
@@ -4467,7 +4467,9 @@ int dsi_init(struct platform_device *pdev)
 		goto err1;
 	}
 
-	if (!cpu_is_omap44xx()) {
+	if (twl_rev_is_tps65921()) {
+		/* VDD_DSI is tied directly to VIO */
+	} else if (!cpu_is_omap44xx()) {
 		dsi_1.vdds_dsi_reg = regulator_get(&pdev->dev, "vdds_dsi");
 		if (IS_ERR(dsi_1.vdds_dsi_reg)) {
 			DSSERR("can't get VDDS_DSI regulator\n");
@@ -4506,7 +4508,7 @@ void dsi_exit(void)
 {
 	kthread_stop(dsi_1.thread);
 
-	if (!cpu_is_omap44xx())
+	if (!cpu_is_omap44xx() && !twl_rev_is_tps65921())
 		regulator_put(dsi_1.vdds_dsi_reg);
 
 	iounmap(dsi_1.base);
