@@ -9,6 +9,8 @@
 #ifndef __LINUX_USB_OTG_H
 #define __LINUX_USB_OTG_H
 
+#include <linux/notifier.h>
+
 /* OTG defines lots of enumeration states before device reset */
 enum usb_otg_state {
 	OTG_STATE_UNDEFINED = 0,
@@ -33,6 +35,14 @@ enum usb_otg_state {
 	OTG_STATE_A_VBUS_ERR,
 };
 
+enum usb_xceiv_events {
+	USB_EVENT_NONE,         /* no events or cable disconnected */
+	USB_EVENT_VBUS,         /* vbus valid event */
+	USB_EVENT_ID,           /* id was grounded */
+	USB_EVENT_CHARGER,      /* usb dedicated charger */
+	USB_EVENT_ENUMERATED,   /* gadget driver enumerated */
+};
+
 /*
  * the otg driver needs to interact with both device side and host side
  * usb controllers.  it decides which controller is active at a given
@@ -43,11 +53,16 @@ struct otg_transceiver {
 	struct device		*dev;
 	const char		*label;
 
+	void			*last_event_data;
+	u8			last_event;
 	u8			default_a;
 	enum usb_otg_state	state;
 
 	struct usb_bus		*host;
 	struct usb_gadget	*gadget;
+
+	/* for notification of usb_xceiv_events */
+	struct atomic_notifier_head	notifier;
 
 	/* to pass extra port status to the root hub */
 	u16			port_status;
@@ -159,6 +174,34 @@ otg_start_srp(struct otg_transceiver *otg)
 	return otg->start_srp(otg);
 }
 
+/* notifiers */
+static inline int
+otg_register_notifier(struct otg_transceiver *otg, struct notifier_block *nb)
+{
+	return atomic_notifier_chain_register(&otg->notifier, nb);
+}
+
+static inline int
+otg_notify_event(struct otg_transceiver *otg, enum usb_xceiv_events event,
+		void *data)
+{
+	otg->last_event = event;
+	otg->last_event_data = data;
+
+	return atomic_notifier_call_chain(&otg->notifier, event, data);
+}
+
+static inline int
+otg_get_last_event(struct otg_transceiver *otg)
+{
+	return otg_notify_event(otg, otg->last_event, otg->last_event_data);
+}
+
+static inline void
+otg_unregister_notifier(struct otg_transceiver *otg, struct notifier_block *nb)
+{
+	atomic_notifier_chain_unregister(&otg->notifier, nb);
+}
 
 /* for OTG controller drivers (and maybe other stuff) */
 extern int usb_bus_start_enum(struct usb_bus *bus, unsigned port_num);

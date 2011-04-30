@@ -24,7 +24,6 @@
 */
 #include <linux/kernel.h>
 #include <linux/module.h>
-#include <linux/slab.h>
 #include <linux/init.h>
 #include <linux/types.h>
 #include <linux/device.h>
@@ -35,12 +34,21 @@
 #include <linux/gpio.h>
 #include <linux/irq.h>
 #include <linux/interrupt.h>
-#include <plat/board-boxer.h>
-#include <linux/i2c/twl.h>
 #include <linux/completion.h>
+#include <linux/i2c/twl.h>
 
-//#define DEBUG(x...)   printk(x)
-#define DEBUG(x...)
+
+#define MAX8903_UOK_GPIO_FOR_IRQ 115
+#define MAX8903_DOK_GPIO_FOR_IRQ 114      
+#define MAX8903_GPIO_CHG_EN      110
+#define MAX8903_GPIO_CHG_STATUS  111
+#define MAX8903_GPIO_CHG_FLT     101
+#define MAX8903_GPIO_CHG_IUSB    102
+#define MAX8903_GPIO_CHG_USUS    104
+#define MAX8903_GPIO_CHG_ILM     61
+
+#define DEBUG(x...)   printk(x)
+//#define DEBUG(x...)
 
 /*macro for TRITON4030 usb controller reg access*/
 #define TRITON_USB_DTCT_CTRL       0x02
@@ -73,6 +81,7 @@
 #define TRITON_USB_DMDP_LV       0x0
 #define TRITON_USB_DMDP_MSK      0x3
 
+#define OPMODE_MASK       	 (3 << 3)
 #define OPMODE_NON_DRIVING       (1 << 3)
 #define SUSPENDM                 (1 << 6)
 #define TRITON_USB_FUNC_CTRL     0x4
@@ -108,6 +117,10 @@
 #define BN_WALL_CHARGER      (DC_STS|VBUS_STS|DMDP_STS)
 #define STD_USB_CHARGER      (VBUS_STS)
 #define STD_WALL_CHARGER     (VBUS_STS|DMDP_STS)
+#define INVALID_CHARGER_0    0
+#define INVALID_CHARGER_1    1
+#define INVALID_CHARGER_5    5
+
 const char* charger_str[CHARGER_MAX_TYPE]={"INVALID CHARGER",
                                                          "INVALID CHARGER",
                                                          "USB CHARGER(500mA)",
@@ -120,9 +133,7 @@ const char* charger_str[CHARGER_MAX_TYPE]={"INVALID CHARGER",
 extern void max17042_update_callback(u8 charger_in);
 
 DEFINE_MUTEX(charger_mutex);
-
-int charger_probed = 0;
-int charger_unprobed_state = 0;
+static DECLARE_COMPLETION(charger_probed);
 
 /*data struct for the charger status and control*/
 struct max8903_charger {
@@ -142,25 +153,6 @@ struct max8903_charger {
 static struct max8903_charger* charger;
 int uok_irq=0,dok_irq=0;
 
-static inline void soft_connect(int connect)
-{
-    if (connect)
-    {
-        twl_i2c_write_u8(TWL4030_MODULE_USB, OPMODE_NON_DRIVING, TRITON_USB_FUNC_CTRL_CLR);
-    }
-    else
-    {
-        // DM/DP set
-        twl_i2c_write_u8(TWL4030_MODULE_USB,
-                         TRITON_USB_DM_DP_PD,
-                         TRITON_USB_OTG_CTRL_CLR);
-
-        twl_i2c_write_u8(TWL4030_MODULE_USB, OPMODE_NON_DRIVING, TRITON_USB_FUNC_CTRL_SET);
-        // Power down the PHY
-        // TODO
-    }
-}
-
 static inline void reset_charger_detect_fsm(void)
 {
     /*enable SW control mode of TRITON USB detection */
@@ -170,7 +162,7 @@ static inline void reset_charger_detect_fsm(void)
 
     /*enable HW control mode of TRITON USB detection (FSM mode)*/
     twl_i2c_write_u8(TWL4030_MODULE_MAIN_CHARGE,
-                       TRITON_USB_HW_CHRG_CTLR_EN,
+                      TRITON_USB_HW_CHRG_CTLR_EN,
                        TRITON_USB_DTCT_CTRL);
 }
 
@@ -221,30 +213,6 @@ void max8903_enable_charge(u8 enable)
     }
     
        mutex_unlock(&charger_mutex);
-   
-#ifdef SW_LED_CTRL
-    msleep(1000);
-
-    /* turn on/off LED WRT to charging status*/
-    current_status = gpio_get_value(MAX8903_GPIO_CHG_STATUS);
-    
-    if(current_status  != DISABLED ){
-            
-        printk("MAX8903: Charging is detected enabled! LED ON\n");
-        /*turn on buffer gate regardless if it is a VBUS or DC-CHG*/
-
-        gpio_direction_input(MAX8903_GPIO_CHG_STATUS);
-        gpio_set_value(MAX8903_DOK_GPIO_FOR_IRQ,1);
-        gpio_direction_output(MAX8903_DOK_GPIO_FOR_IRQ,1);
-        printk("LED UP\n");
-    }
-    else{
-        printk("MAX8903: Charging is detected disabled! LED OFF\n");
-        /*turn off buffer gate */  
-        gpio_direction_output(MAX8903_DOK_GPIO_FOR_IRQ,1);
-    }
-#endif  
- 
 }
 
 /*charger differentiation*/
@@ -257,75 +225,38 @@ void max8903_enable_charge(u8 enable)
   IV.  USB charger: VBUS only,D+/D- not shorted,charge via VBUS,limit 500mA 
   V.   USB charger: VBUS only,D+/D- shorted,charge via VBUS,limit 500mA
 */
-void max8903_charger_enable(int on)
+void max8903_charger_enable(int dtct_status)
 {
-    u8 value;
     u8 charger_type = 0;
+    u8 funcctrl;
 
-    if (!charger_probed) {
-        charger_unprobed_state = on;
-	return;
+    DEBUG("%s: dtct_status 0x%02x\n", __FUNCTION__, dtct_status );
+
+    wait_for_completion(&charger_probed);
+
+    /*check DC*/
+    if ( !gpio_get_value(MAX8903_DOK_GPIO_FOR_IRQ) ) {
+	charger_type |= DC_STS;
     }
 
-    /*USB/WALL removal*/
-    if (on == 0) {
-        soft_connect(0);
-        charger->adapter_online = 0;
-        charger->adapter_active = 0;
-        gpio_set_value(MAX8903_GPIO_CHG_ILM, CHG_ILM_SELECT_USB);
-        charger->adapter_curr_limit = USB_CURRENT_LIMIT_HIGH; /* back to high limit by default */
-        charger->usb_online = 0;
-        charger->usb_active = 0;
-        power_supply_changed(&charger->usb);
-        power_supply_changed(&charger->adapter);
-        max17042_update_callback(0);
-        max8903_enable_charge(0);
-        printk("Charger Unplugged!\n");
+    /*check VBUS*/
+    if ( !gpio_get_value(MAX8903_UOK_GPIO_FOR_IRQ) ) {
+	charger_type |= VBUS_STS;
     }
 
-    /*insertion*/
-    else {
-        /*check DM/DP*/
-        twl_i2c_read(TWL4030_MODULE_MAIN_CHARGE, &value, TRITON_USB_DTCT_CTRL, 1);
+    if ( charger_type ) {
+	/* have to have either VBUS or DC to be a charger -- otherwise it's an unplug */
 
-        if ((value & TRITON_USB_CHGR_MSK) == TRITON_USB_CHGR_UNKNOWN) {
-            // Oh dear, charger state machine seems to have crapped itself,
-            // reset it and see if it recovers
-            printk(KERN_ERR "Unknown charger type: 0x%X, resetting charger state machine\n", value);
-            reset_charger_detect_fsm();
-        }
-        // Sleep for half a second here, waiting for the 
-        // state machine to reset/do its detection thing
-        msleep(500);
-
-        /*check DC*/
-        if ( !gpio_get_value(MAX8903_DOK_GPIO_FOR_IRQ) ) {
-            charger_type |= DC_STS;
-        }
-
-        /*check VBUS*/
-        if ( !gpio_get_value(MAX8903_UOK_GPIO_FOR_IRQ) ) {
-            charger_type |= VBUS_STS;
-        }
-
-        /*check DM/DP*/
-        twl_i2c_read(TWL4030_MODULE_MAIN_CHARGE, &value, TRITON_USB_DTCT_CTRL, 1);
-        if ( (value & TRITON_USB_CHGR_MSK)== TRITON_USB_CHGR_WALL)
-        {
+        if ( (dtct_status & TRITON_USB_CHGR_MSK)== TRITON_USB_CHGR_WALL) {
             charger_type|=DMDP_STS;
+	    DEBUG("%s: D+/D- shorted\n", __FUNCTION__ );
         }
 
-        /*determine charger type*/
-        if (charger_type <=7) {
-            printk("%s Detected!\n",charger_str[charger_type]);
-        }
-        /*should never reach this */
-        else {
-            printk("!!!!   Charger Detection Fault!  !!!!\n");
-        }
         switch(charger_type) {
             case DC_WALL_CHARGER:
             case BN_WALL_CHARGER:
+		printk("%s: %s Detected!\n", __FUNCTION__, charger_str[charger_type]);
+                gpio_direction_output(MAX8903_GPIO_CHG_USUS, 0);
                 charger->adapter_online = 1;
                 charger->adapter_active = 1;
                 charger->adapter_curr_limit = AC_CURRENT_LIMIT;
@@ -335,6 +266,8 @@ void max8903_charger_enable(int on)
                 power_supply_changed(&charger->adapter);
                 break;
             case STD_WALL_CHARGER :
+		printk("%s: %s Detected!\n", __FUNCTION__, charger_str[charger_type]);
+                gpio_direction_output(MAX8903_GPIO_CHG_USUS, 0); 
                 charger->adapter_online = 1;
                 charger->adapter_active = 1;
                 charger->adapter_curr_limit = USB_CURRENT_LIMIT_HIGH;
@@ -344,21 +277,44 @@ void max8903_charger_enable(int on)
                 max8903_enable_charge(1);
                 power_supply_changed(&charger->adapter);
                 break;
+            case INVALID_CHARGER_0 :
+            case INVALID_CHARGER_1 :
+            case INVALID_CHARGER_5 :
+                printk("INVALID Charger %d - do not enable charging\n", charger_type);
+                max8903_enable_charge(0); 
+                gpio_direction_output(MAX8903_GPIO_CHG_USUS, 1); 
+                break;
             case BN_USB_CHARGER:
             case STD_USB_CHARGER :
             /*everything else, use it as USB charger*/
             default:
-                soft_connect(1); // We want USB enumeration for this type.
+		printk("%s: %s Detected!\n", __FUNCTION__, charger_str[charger_type]);
                 charger->usb_online = 1;
                 charger->usb_active = 1;
                 charger->adapter_curr_limit = USB_CURRENT_LIMIT_HIGH;
                 gpio_set_value(MAX8903_GPIO_CHG_IUSB, CHG_IUSB_SELECT_500mA);
                 gpio_set_value(MAX8903_GPIO_CHG_ILM, CHG_ILM_SELECT_USB);
                 max17042_update_callback(1);
-                max8903_enable_charge(1);
+                max8903_enable_charge(1); 
                 power_supply_changed(&charger->usb);
+                gpio_direction_output(MAX8903_GPIO_CHG_USUS, 0); 
                 break;
         }
+    }
+    else {
+	/* no VBUS, no DC */
+        max8903_enable_charge(0);
+        gpio_direction_output(MAX8903_GPIO_CHG_USUS, 1); // ensure that we will not draw current
+        charger->adapter_online = 0;
+        charger->adapter_active = 0;
+        gpio_set_value(MAX8903_GPIO_CHG_ILM, CHG_ILM_SELECT_USB);
+        charger->adapter_curr_limit = USB_CURRENT_LIMIT_HIGH; /* back to high limit by default */
+        charger->usb_online = 0;
+        charger->usb_active = 0;
+        power_supply_changed(&charger->usb);
+        power_supply_changed(&charger->adapter);
+        max17042_update_callback(0);
+        printk("Charger Unplugged!\n");
     }
 }
 
@@ -551,7 +507,7 @@ static int __init max8903_charger_probe(struct platform_device *pdev)
         goto exit6;
     }
 
-    gpio_direction_output(MAX8903_GPIO_CHG_USUS, 0);    
+    gpio_direction_output(MAX8903_GPIO_CHG_USUS, 1); // leave USUS disabled until we connect
 
     /*~CEN control */
     if (gpio_request(MAX8903_GPIO_CHG_EN, "max8903_chg_en") < 0) {
@@ -598,9 +554,7 @@ static int __init max8903_charger_probe(struct platform_device *pdev)
         goto exitd;
     }
 
-    charger_probed = 1;
-    if (charger_unprobed_state)
-        max8903_charger_enable(charger_unprobed_state);
+    complete_all(&charger_probed);
 
     return 0;
 

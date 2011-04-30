@@ -23,7 +23,6 @@
 
 
 #include <linux/module.h>
-#include <linux/slab.h>
 #include <linux/param.h>
 #include <linux/jiffies.h>
 #include <linux/workqueue.h>
@@ -40,7 +39,6 @@
 #include <linux/interrupt.h>
 #include <linux/fs.h>
 #include <linux/max17042.h>
-#include <plat/board-boxer.h>
 #include <linux/ctype.h>
 
 #define NAME				"max17042"
@@ -48,6 +46,10 @@
 #define RESUME_ENTRIES			10
 #define MONITOR_PERIOD  		30*HZ		//put it 30s or update on significant change
 #define LOWER_THRESHOLD_VOL     	3000
+
+#define DUMP_FMT_NONE 0
+#define DUMP_FMT_SHORT 1
+#define DUMP_FMT_LONG 2
 
 // refresh history data whenever rsoc changes by this % : might be written to file less frequently
 #define SAVE_STORE_SOC_THRESHOLD	1
@@ -58,14 +60,7 @@
 #define HISTORY_MAGIC		0x1234
 
 /*leave the debug msg on until later release TBD*/
-//#define DEBUG(x...) 			printk(x)
-#define DEBUG(x...)
-
-static const enum dump_format {
-    DUMP_FMT_NONE,
-    DUMP_FMT_SHORT,
-    DUMP_FMT_LONG,
-};
+#define DEBUG(x...) 			printk(x)
 
 // DEBUG_NO_BATTERY is used for configs without a real battery (bench supply)
 // this produces no Alert signal on faults (like temperature/capacity)
@@ -127,7 +122,7 @@ struct max17042_data {
    unsigned long next_save; // jiffies at which history should next be written
 };
 
-static const enum power_supply_property max17042_battery_props[] = {
+static enum power_supply_property max17042_battery_props[] = {
    POWER_SUPPLY_PROP_STATUS,
    POWER_SUPPLY_PROP_HEALTH,    
    POWER_SUPPLY_PROP_PRESENT,
@@ -289,7 +284,7 @@ static int max17042_set_config( struct max17042_data *max17042)
 {
 	int err; 
 			   
-	static const u16 config = (MAX17042_CONFIG_Ts |
+	static const u16 config = (MAX17042_CONFIG_Ts | 
 #ifndef DEBUG_NO_BATTERY
                           MAX17042_CONFIG_Aen | 
 #endif
@@ -523,7 +518,6 @@ static void max17042_irq_work_func(struct work_struct *work)
         int err;
         u16 buf =0xFFFF;
 	//to prevent multiple interrupts on violation of temperature threshold
-	u16 temp; 	
 
         struct max17042_data *max17042
                         = container_of(work, struct max17042_data, irq_work);
@@ -677,7 +671,7 @@ static int max17042_battery_get_property(struct power_supply *psy,
       }
       break;
    case POWER_SUPPLY_PROP_TEMP:
-      val->intval = max17042->temp_cached;
+      val->intval = (max17042->temp_cached/100000);
       //DEBUG(KERN_NOTICE "bq27x00_battery_get_property(), temp(%d)\n", val->intval);       
       break;
    case POWER_SUPPLY_PROP_TIME_TO_EMPTY_NOW:
@@ -740,9 +734,8 @@ static int max17042_battery_current(struct max17042_data* max17042)
 //resolution 0.0039-degree, or 3900uC
 static int max17042_battery_temperature(struct max17042_data* max17042)
 {
-	int err;
+	int err = 0;
 	u16 temp = 0;
-
         err =max17042_read(MAX17042_Temperature, &temp, max17042);	
         //DEBUG("temp = 0x%04x\n", temp);
 
@@ -752,16 +745,16 @@ static int max17042_battery_temperature(struct max17042_data* max17042)
 		// in unit of micro-degree, 
 		if ( temp & (1<<15) ) {
 			//negtive value
-			max17042->temp_cached = COMPLEMENT_VAL(temp, TEMP_RESOLUTION, 100000); 
-			//(( ((((~temp) & 0x7FFF) + 1) * 3900)  / 100000 ) * (-1))
+			max17042->temp_cached = COMPLEMENT_VAL(temp, TEMP_RESOLUTION, 1); 
+			//(~(temp & 0x7FFF) + 1) * TEMP_RESOLUTION * (-1);
 		}
 		else {
 			//positive value
-			max17042->temp_cached = NON_COMPLEMENT_VAL(temp, TEMP_RESOLUTION, 100000);
-			//( ((((~temp) & 0x7FFF) + 1) * 3900)  / 100000 ) )
+			max17042->temp_cached = NON_COMPLEMENT_VAL(temp, TEMP_RESOLUTION, 1);
+			//(temp & 0x7FFF) * TEMP_RESOLUTION;
 		}
 	}
-
+	
 	return err;
 }
 
@@ -1104,9 +1097,9 @@ static void max17042_battery_status_monitor(struct work_struct *work)
 static ssize_t max17042_r_val(struct device *dev, struct device_attribute *attr, char *buf)
 {
         u16 rtval = 0x0;
-        int err;        
+        int err = 0;       
         struct max17042_data *max17042 = dev_get_drvdata(dev);
-        
+
         err = max17042_read(max17042->max17042_reg, &rtval, max17042);
         if ( err < 0 ) {
         	DEBUG( KERN_ERR "sysfs: max17042 reg value read errror.");
@@ -1179,15 +1172,15 @@ static ssize_t max17042_r_interval(struct device *dev, struct device_attribute *
 		  unsigned long interval;
 	 	
 	interval=(atomic_read(&max17042->interval)/HZ);
-		
-        return sprintf(buf, "MAX17042: polling interval reads %lu HZ\n", interval);
+
+	return sprintf(buf, "MAX17042: polling interval reads %lu HZ\n", interval);
 }
 static DEVICE_ATTR(interval, S_IWUSR | S_IRUGO, max17042_r_interval, max17042_w_interval);
 
 static ssize_t max17042_w_dumpformat(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
 {
         struct max17042_data *max17042 = dev_get_drvdata(dev);
-        
+
 	if ( !count )
 	    return -EINVAL;
 
@@ -1324,7 +1317,7 @@ static int __devinit max17042_probe(struct i2c_client *client,
 	max17042->rsoc_base = max17042->rsoc_cached = 100;
 	max17042->volt_cached = 4000000;
 	max17042->curr_cached = 300000;
-   	max17042->temp_cached = 250;	
+   	max17042->temp_cached = 25000000;	
 	max17042->dumpFormat = DUMP_FMT_NONE;
 	max17042->next_save = jiffies + HISTORY_REFRESH_INTERVAL*HZ;
 
@@ -1425,7 +1418,7 @@ err0:
 
 static int __devexit max17042_remove(struct i2c_client *client)
 {
-        struct max17042_data *max17042 = i2c_get_clientdata(client);
+	struct max17042_data *max17042 = i2c_get_clientdata(client);
 
 	power_supply_unregister(&max17042->bat);
 	sysfs_remove_group(&client->dev.kobj, &max17042_attribute_group);
@@ -1491,15 +1484,15 @@ static const struct i2c_device_id max17042_id[] = {
 MODULE_DEVICE_TABLE(i2c, max17042_id);
 
 static struct i2c_driver max17042_driver = {
-        .driver = {
-                   .name = NAME,
-                   },
-        .probe = max17042_probe,
-        .remove = __devexit_p(max17042_remove),
-        .resume = max17042_resume,
-        .suspend = max17042_suspend,
+	.driver = {
+		.name = NAME,
+	},
+	.probe = max17042_probe,
+	.remove = __devexit_p(max17042_remove),
+	.resume = max17042_resume,
+	.suspend = max17042_suspend,
 	.shutdown = max17042_shutdown,
-        .id_table = max17042_id,
+	.id_table = max17042_id,
 };
 
 static int __init max17042_init(void)

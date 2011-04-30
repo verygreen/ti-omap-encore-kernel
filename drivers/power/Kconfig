@@ -97,6 +97,12 @@ config BATTERY_WM97XX
 	help
 	  Say Y to enable support for battery measured by WM97xx aux port.
 
+config BATTERY_MAX17042
+	tristate "MAX17042 gas gauge driver"
+	depends on I2C
+	help
+	  Say Y here to enable support for chip MAX17042 gas gauge.
+
 config BATTERY_BQ27x00
 	tristate "BQ27200 battery driver"
 	depends on I2C
@@ -136,16 +142,10 @@ config BATTERY_CPCAP
 	help
 	 Say Y to include support for CPCAP Main Battery.
 
-config BATTERY_MAX17042
-	tristate "MAX17042 gas gauge driver"
-	depends on I2C
-	help
-	  Say Y here to enable support for chip MAX17042 gas gauge.
-
 config CHARGER_MAX8903
 	tristate "MAX8903 charger driver"
 	depends on BATTERY_MAX17042 && GENERIC_GPIO
 	help
-	  Say Y here to enable support for MAXIM8903 charger 
+	Say Y here to enable support for MAXIM8903 charger
 
 endif # POWER_SUPPLY

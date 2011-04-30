@@ -2145,7 +2145,10 @@ bad_config:
 	/* Android has hardcoded the sysfs path to "usb_mass_storage"
 	 * so we create a link to point to the actual path.
 	 */
+	/* But not if the board geristered it all by itself */
+#if 0
 	sysfs_create_link( (dev->kobj).parent, &dev->kobj,"usb_mass_storage");
+#endif
 #endif /* CONFIG_USB_GADGET_MUSB_HDRC */
 	status = 0;
 #endif

@@ -31,16 +31,7 @@
 #define	KXTF9_GPIO_FOR_IRQ		113
 #endif /* CONFIG_INPUT_KXTF9 */
 
-#ifdef CONFIG_BATTERY_MAX17042
 #include <linux/max17042.h>
-#endif
-
-#ifdef CONFIG_MAX9635
-#include <linux/max9635.h>
-#define MAX9635_I2C_SLAVE_ADDRESS   MAX9635_I2C_SLAVE_ADDRESS1
-#define MAX9635_GPIO_FOR_IRQ        0
-#define MAX9635_DEFAULT_POLL_INTERVAL 1000
-#endif
 
 #include <linux/spi/spi.h>
 #include <linux/i2c/twl.h>
@@ -979,32 +970,6 @@ struct max17042_platform_data max17042_platform_data_here = {
 };
 #endif
 
-#ifdef CONFIG_MAX9635
-static int max9635_device_resource(int allocate)
-{
-	if (allocate) {
-		if (gpio_request(MAX9635_GPIO_FOR_IRQ, "max9635_irq") < 0) {
-			printk(KERN_ERR "Failed to get GPIO for max9635\n");
-			return -1;
-		}
-	
-		gpio_direction_input(MAX9635_GPIO_FOR_IRQ);
-		omap_set_gpio_debounce(MAX9635_GPIO_FOR_IRQ, 0);
-	}
-	else
-	{
-		gpio_free(MAX9635_GPIO_FOR_IRQ);
-	}
-	return 0;
-}
-
-static struct max9635_pdata __initdata max9635_platform_data = {
-    .gpio           = MAX9635_GPIO_FOR_IRQ,
-    .poll_interval  = MAX9635_DEFAULT_POLL_INTERVAL,
-	.device_resource = max9635_device_resource,
-};
-#endif /* CONFIG_MAX9635 */
-
 static struct i2c_board_info __initdata boxer_i2c_bus1_info[] = {
 #ifdef CONFIG_BATTERY_MAX17042
 	{
@@ -1026,13 +991,6 @@ static struct i2c_board_info __initdata boxer_i2c_bus1_info[] = {
 		.irq = OMAP_GPIO_IRQ(KXTF9_GPIO_FOR_IRQ),
 	},
 #endif /* CONFIG_INPUT_KXTF9 */
-#ifdef CONFIG_MAX9635
-    {
-        I2C_BOARD_INFO(MAX9635_NAME, MAX9635_I2C_SLAVE_ADDRESS),
-        .platform_data = &max9635_platform_data,
-        .irq = OMAP_GPIO_IRQ(MAX9635_GPIO_FOR_IRQ),
-    },
-#endif /* CONFIG_MAX9635 */
 };
 
 #if defined(CONFIG_SND_SOC_TLV320DAC3100) || defined(CONFIG_SND_SOC_TLV320DAC3100_MODULE)
@@ -1095,7 +1053,7 @@ static struct i2c_board_info __initdata boxer_i2c_bus2_info[] = {
 static struct usb_mass_storage_platform_data mass_storage_pdata = {
 	.vendor = "B&N     ",
 	.product = "Ebook Disk      ",
-	.release = 0x0100,
+	.release = 0x0101,
 	.nluns = 2
 };
 
@@ -1111,16 +1069,19 @@ static struct platform_device usb_mass_storage_device = {
 
 static struct omap_musb_board_data musb_board_data = {
 	.interface_type		= MUSB_INTERFACE_ULPI,
+#ifdef CONFIG_USB_MUSB_OTG
+	.mode			= MUSB_OTG,
+#elif defined(CONFIG_USB_MUSB_HDRC_HCD)
+	.mode			= MUSB_HOST,
+#elif defined(CONFIG_USB_GADGET_MUSB_HDRC)
 	.mode			= MUSB_PERIPHERAL,
+#endif
 	.power			= 100,
 };
 
 static int __init omap_i2c_init(void)
 {
-    int i2c1_devices;
-    printk("***********IN omap_i2c_init***********\n");
-
-/* Disable OMAP 3630 internal pull-ups for I2Ci */
+	/* Disable OMAP 3630 internal pull-ups for I2Ci */
 	if (cpu_is_omap3630()) {
 
 		u32 prog_io;
@@ -1138,16 +1099,8 @@ static int __init omap_i2c_init(void)
 		omap_ctrl_writel(prog_io, OMAP36XX_CONTROL_PROG_IO_WKUP1);
 	}
 
-	i2c1_devices = ARRAY_SIZE(boxer_i2c_bus1_info);
-
-#ifdef CONFIG_MAX9635
-	// right now evt2 is not stuffed with the max9635 light sensor due to i2c conflict 
-	// tbd if it will be reworked on specific units
-	--i2c1_devices;
-#endif
-    printk("****omap_i2c_init(): Number of devices on bus1: %i\n", i2c1_devices);
 	omap_register_i2c_bus(1, 100, NULL, boxer_i2c_bus1_info,
-			i2c1_devices);
+			ARRAY_SIZE(boxer_i2c_bus1_info));
 	omap_register_i2c_bus(2, 400, NULL, boxer_i2c_bus2_info,
 			ARRAY_SIZE(boxer_i2c_bus2_info));
 	return 0;
