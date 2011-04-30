@@ -182,6 +182,7 @@ static int omap3_enter_idle_bm(struct cpuidle_device *dev,
 			       struct cpuidle_state *state)
 {
 	struct cpuidle_state *new_state = state;
+	u32 new_mpu_state;
 
 	u32 cam_state, usb_state;
 	u32 iva2_state, sgx_state, dss_state, new_core_state;
@@ -229,8 +230,23 @@ static int omap3_enter_idle_bm(struct cpuidle_device *dev,
 			    usb_state > PWRDM_POWER_OFF)
 				new_core_state = PWRDM_POWER_RET;
 		}
+
+                /* WA for SGX performance issue  */
+                /* Avoid having the MPU PWDM going to OFF while the SGX is active */
+                /* Avoid having the CORE PWDM to go in RET or OFF, allow in fact only C1,C2,C3 */
+
+                sgx_state = pwrdm_get_idle_state(sgx_pd);
+                new_mpu_state = cx->mpu_state;
+
+                if (sgx_state == PWRDM_POWER_ON)
+                {
+                  if (cx->mpu_state < PWRDM_POWER_RET)
+                    new_mpu_state = PWRDM_POWER_RET;
+                  new_core_state = PWRDM_POWER_INACTIVE;
+                }
+
 		/* Fallback to new target core state */
-		while (cx->core_state < new_core_state) {
+		while ((cx->core_state < new_core_state) || (cx->mpu_state < new_mpu_state)) {
 			state--;
 			cx = cpuidle_get_statedata(state);
 		}
