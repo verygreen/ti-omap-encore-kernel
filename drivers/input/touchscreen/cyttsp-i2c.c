@@ -45,9 +45,7 @@
 #ifdef CONFIG_HAS_EARLYSUSPEND
 #include <linux/earlysuspend.h>
 #endif /* CONFIG_HAS_EARLYSUSPEND */
-#ifdef CONFIG_MACH_ENCORE
 #include <linux/regulator/consumer.h>
-#endif /* CONFIG_MACH_ENCORE */
 
 #define CY_DECLARE_GLOBALS
 
@@ -67,6 +65,7 @@ struct cyttsp {
 	struct i2c_client *client;
 	struct input_dev *input;
 	struct work_struct work;
+	struct work_struct init_work;
 	struct work_struct update_work;
 	struct timer_list timer;
 	char phys[32];
@@ -80,13 +79,13 @@ struct cyttsp {
 #ifdef CONFIG_HAS_EARLYSUSPEND
 	struct early_suspend early_suspend;
 #endif /* CONFIG_HAS_EARLYSUSPEND */
-#ifdef CONFIG_MACH_ENCORE
 	struct regulator *reg;
-#endif /* CONFIG_MACH_ENCORE */
 };
 static u8 irq_cnt;		/* comparison counter with register valuw */
 static u32 irq_cnt_total;	/* total interrupts */
 static u32 irq_err_cnt;		/* count number of touch interrupts with err */
+static u8 fw_update_flag = 0;   /* fw update state tracking flag */
+static u8 fw_cal_flag = 0;      /* fw calibrate state tracking flag */
 #define CY_IRQ_CNT_MASK	0x000000FF	/* mapped for sizeof count in reg */
 #define CY_IRQ_CNT_REG	0x00		/* tt_undef[0]=reg 0x1B - Gen3 only */
 
@@ -101,8 +100,10 @@ static DEFINE_MUTEX(thread_mutex);
 /* ****************************************************************************
  * Prototypes for static functions
  * ************************************************************************** */
+static int cyttsp_power_on(struct cyttsp *ts);
 static int cyttsp_calibrate(struct cyttsp *ts);
 static int cyttsp_bootload_app(struct cyttsp *ts);
+static void cyttsp_init_worker(struct work_struct * work);
 static void cyttsp_update_worker(struct work_struct * work);
 static void cyttsp_xy_worker(struct work_struct *work);
 static irqreturn_t cyttsp_irq(int irq, void *handle);
@@ -203,15 +204,40 @@ static ssize_t cyttsp_irq_enable(struct device *dev,
 
 static DEVICE_ATTR(irq_enable, 0777, cyttsp_irq_status, cyttsp_irq_enable);
 
-void cyttsp_update_worker(struct work_struct *work)
+void cyttsp_update_worker(struct work_struct * work)
 {
 	int retval = CY_OK;
 	struct cyttsp *ts = container_of(work, struct cyttsp, update_work);
-	/* TP FW update occurs only if the Kernel TPFW is *GREATER* than 
-	   the version in the TP chip.  For example, a newer version 
-	   deployed in the factory will stay intact if tshe Kernel 
-	   version is older.
-	*/
+	mutex_lock(&thread_mutex);
+	/* enter bootloader to load new app into TTSP Device */
+	retval = cyttsp_bootload_app(ts);
+	printk("cyttsp:%s: Updated TP FW to %02X%02X\n",
+			__FUNCTION__,
+			cyttsp_app_verh(),
+			cyttsp_app_verl() );
+
+	/* take TTSP device out of bootloader mode;
+	 * switch back to TrueTouch operational mode */
+	retval = i2c_smbus_write_i2c_block_data(ts->client,
+						CY_REG_BASE,
+						sizeof(bl_cmd),
+						bl_cmd);
+
+	msleep(CYTTSP_MDELAY);
+
+	if(mutex_is_locked(&thread_mutex)){
+		mutex_unlock(&thread_mutex);
+	}
+
+	fw_update_flag = 0;
+	return;
+
+}
+
+void cyttsp_init_worker(struct work_struct *work)
+{
+	int retval = CY_OK;
+	struct cyttsp *ts = container_of(work, struct cyttsp, init_work);
 	u16 chip_ttspver = (g_bl_data.ttspver_hi << 8) | g_bl_data.ttspver_lo;
 	u16 kern_ttspver = (cyttsp_tts_verh() << 8) | cyttsp_tts_verl();
 
@@ -225,57 +251,14 @@ void cyttsp_update_worker(struct work_struct *work)
 	cyttsp_debug("\nchip_appid=%X; kern_appid=%X", chip_appid, kern_appid);
 	cyttsp_debug("\nchip_appver=%X; kern_appver=%X\n", chip_appver, kern_appver);
 
-	if (CY_LESS(chip_ttspver, kern_ttspver) ||
-		CY_LESS(chip_appid, kern_appid) ||
-		CY_LESS(chip_appver, kern_appver) ||
-		CY_DIFF(g_bl_data.cid_0, cyttsp_cid_0())  ||
-		CY_DIFF(g_bl_data.cid_1, cyttsp_cid_1())  ||
-		CY_DIFF(g_bl_data.cid_2, cyttsp_cid_2())  ||
-		cyttsp_force_fw_load()){
+	retval = cyttsp_power_on(ts);
 
-		cyttsp_debug("blttsp=0x%02X%02X flttsp=0x%02X%02X force=%d\n", \
-				g_bl_data.ttspver_hi, g_bl_data.ttspver_lo, \
-				cyttsp_tts_verh(), cyttsp_tts_verl(), \
-				cyttsp_force_fw_load());
-
-		cyttsp_debug("blappid=0x%02X%02X flappid=0x%02X%02X\n", \
-				g_bl_data.appid_hi, g_bl_data.appid_lo, \
-				cyttsp_app_idh(), cyttsp_app_idl());
-				cyttsp_debug("blappver=0x%02X%02X flappver=0x%02X%02X\n", \
-				g_bl_data.appver_hi, g_bl_data.appver_lo, \
-				cyttsp_app_verh(), cyttsp_app_verl());
-				cyttsp_debug("blcid=0x%02X%02X%02X flcid=0x%02X%02X%02X\n", \
-				g_bl_data.cid_0, \
-				g_bl_data.cid_1, \
-				g_bl_data.cid_2, \
-				cyttsp_cid_0(), \
-				cyttsp_cid_1(), \
-				cyttsp_cid_2());
-
-		/* enter bootloader to load new app into TTSP Device */
-		retval = cyttsp_bootload_app(ts);
-
-		cyttsp_debug("%s: Updated TP FW to %02X%02X\n",
-				__FUNCTION__, cyttsp_app_verh(), cyttsp_app_verl() );
-
-
-		/* take TTSP device out of bootloader mode;
-        	 * switch back to TrueTouch operational mode */
-		retval = i2c_smbus_write_i2c_block_data(ts->client,
-							CY_REG_BASE,
-							sizeof(bl_cmd), bl_cmd);
-		msleep(CYTTSP_MDELAY);
-		if(retval < CY_OK){
-			printk("\ncyttsp:: err controller could not be switched out of BL");
-		}
-
-
+	if( retval != 0)
+	{
+		cyttsp_error(" ERROR:  could not power up the TS controller\n");
+		/* Diasble IRQ if this fails */
+		disable_irq_nosync(ts->client->irq);
 	}
-
-
-	/* wait for TTSP Device to complete
-	* switch to Operational mode */
-	msleep(CYTTSP_MDELAY);
 
         /* init gesture setup;
          * this is required even if not using gestures
@@ -300,33 +283,13 @@ void cyttsp_update_worker(struct work_struct *work)
                 ts->platform_data->power_state == CY_ACTIVE_STATE ? \
                  "ACTIVE" : "IDLE");
 
-
-	if(mutex_is_locked(&thread_mutex)){
-		mutex_unlock(&thread_mutex);
-	}
-
-        /* Interrupt setup */
-        if (ts->client->irq) {
-		cyttsp_info("Setting up interrupt %d\n",ts->client->irq);
-
-		/* request_irq() will call enable_irq() */
-		retval = request_irq(ts->client->irq,
-					cyttsp_irq,
-					IRQF_TRIGGER_FALLING,
-					ts->client->dev.driver->name,
-					ts);
-
-		if (retval) {
-			cyttsp_alert("error: could not request irq\n");
-			free_irq(ts->client->irq, ts);
-		}
-	}
-
 	irq_cnt = 0;
 	irq_cnt_total = 0;
 	irq_err_cnt = 0;
 
-	atomic_set(&ts->irq_enabled, 1);
+	if(mutex_is_locked(&thread_mutex)){
+		mutex_unlock(&thread_mutex);
+	}
 
 	return ;
 }
@@ -593,6 +556,7 @@ void cyttsp_xy_worker(struct work_struct *work)
 	else
 		rev_y = false;
 
+
 	if (cur_tch) {
 		struct cyttsp_gen2_xydata_t *pxy_gen2_data;
 		struct cyttsp_gen3_xydata_t *pxy_gen3_data;
@@ -672,10 +636,8 @@ void cyttsp_xy_worker(struct work_struct *work)
 			g_xy_data.y4 =
 				INVERT_X(g_xy_data.y4, ts->platform_data->maxy);
 		}
-		if(g_xy_data.x4 <= 5) g_xy_data.x4 = 5;
-		if(g_xy_data.x4 >= ts->platform_data->maxx -5) g_xy_data.x4 = ts->platform_data->maxx - 5;
-		if(g_xy_data.y4 <= 5) g_xy_data.y4 = 5;
-		if(g_xy_data.y4 >= ts->platform_data->maxy -5) g_xy_data.y4 = ts->platform_data->maxy - 5;
+		 if (tilt)
+                        FLIP_XY(g_xy_data.x4, g_xy_data.y4);
 
 		id = GET_TOUCH4_ID(g_xy_data.touch34_id);
 		if (ts->platform_data->use_trk_id) {
@@ -724,11 +686,6 @@ void cyttsp_xy_worker(struct work_struct *work)
 			g_xy_data.y3 =
 				INVERT_X(g_xy_data.y3, ts->platform_data->maxy);
 		}
-		if(g_xy_data.x3 <= 5) g_xy_data.x3 = 5;
-		if(g_xy_data.x3 >= ts->platform_data->maxx -5) g_xy_data.x3 = ts->platform_data->maxx - 5;
-		if(g_xy_data.y3 <= 5) g_xy_data.y3 = 5;
-		if(g_xy_data.y3 >= ts->platform_data->maxy -5) g_xy_data.y3 = ts->platform_data->maxy - 5;
-
 		id = GET_TOUCH3_ID(g_xy_data.touch34_id);
 		if (ts->platform_data->use_trk_id) {
 			cur_mt_pos[CY_MT_TCH3_IDX][CY_XPOS] =
@@ -776,11 +733,6 @@ void cyttsp_xy_worker(struct work_struct *work)
 			g_xy_data.y2 =
 				INVERT_X(g_xy_data.y2, ts->platform_data->maxy);
 		}
-		if(g_xy_data.x2 <= 5) g_xy_data.x2 = 5;
-		if(g_xy_data.x2 >= ts->platform_data->maxx -5) g_xy_data.x2 = ts->platform_data->maxx - 5;
-		if(g_xy_data.y2 <= 5) g_xy_data.y2 = 5;
-		if(g_xy_data.y2 >= ts->platform_data->maxy -5) g_xy_data.y2 = ts->platform_data->maxy - 5;
-
 		id = GET_TOUCH2_ID(g_xy_data.touch12_id);
 		if (ts->platform_data->use_trk_id) {
 			cur_mt_pos[CY_MT_TCH2_IDX][CY_XPOS] =
@@ -828,10 +780,6 @@ void cyttsp_xy_worker(struct work_struct *work)
 			g_xy_data.y1 =
 				INVERT_X(g_xy_data.y1, ts->platform_data->maxy);
 		}
-		if(g_xy_data.x1 <= 5) g_xy_data.x1 = 5;
-		if(g_xy_data.x1 >= ts->platform_data->maxx -5) g_xy_data.x1 = ts->platform_data->maxx - 5;
-		if(g_xy_data.y1 <= 5) g_xy_data.y1 = 5;
-		if(g_xy_data.y1 >= ts->platform_data->maxy -5) g_xy_data.y1 = ts->platform_data->maxy - 5;
 
 		id = GET_TOUCH1_ID(g_xy_data.touch12_id);
 		if (ts->platform_data->use_trk_id) {
@@ -1512,9 +1460,10 @@ static int cyttsp_calibrate(struct cyttsp *ts)
 											sizeof(gesture_setup), 
 											&gesture_setup);
 						mdelay(CY_DLY_DFLT);
-						if (!(ret_val < CY_OK))
+						if (!(ret_val < CY_OK)) {
 							ts->platform_data->power_state = CY_ACTIVE_STATE;
-						else
+							enable_irq(ts->client->irq);
+						} else
 							ts->platform_data->power_state = CY_IDLE_STATE;
 
 						cyttsp_debug("Retval=%d Power state is %s\n", \
@@ -1998,12 +1947,9 @@ static ssize_t ttsp_tpfwver_store(struct device *dev,
 static ssize_t ttsp_forcecal_show(struct device *dev,
 				struct device_attribute *attr, char *buf)
 {
-	int cnt;
+	int cnt = 0;
 	
-	cnt=0;
-
 	cyttsp_info("%s: \n", __FUNCTION__);
-
 	cnt = cnt + sprintf(&buf[cnt], "%02X\n ", initiate_tpcal );
 	buf[cnt--] = 0;
 				
@@ -2030,22 +1976,67 @@ static ssize_t ttsp_forcecal_store(struct device *dev,
 		return err;
 
 	switch (value) {
-	case 1:
-		initiate_tpcal = 0x88;
-		printk("%s: Forcing TP calibration on next power down.\n", __FUNCTION__);
-		break;
 	case 2:
-		cyttsp_calibrate(ts);
-		printk("%s: Forcing TP calibration NOW.\n", __FUNCTION__);
+		if( initiate_tpcal != 1) {
+			initiate_tpcal = 1;
+			cyttsp_calibrate(ts);
+			initiate_tpcal = 0;
+			printk("%s: Forcing TP calibration NOW.\n", __FUNCTION__);
+		}
 		break;		
 	default:
-		initiate_tpcal = 0x00;
-		printk("%s: No TP calibration .\n", __FUNCTION__);
 		break;
 	}
 	return size;
 }
 
+
+static ssize_t ttsp_fwupdate_store(struct device *dev,
+				struct device_attribute *attr,
+				const char *buf, size_t size)
+{
+	unsigned long value = 0;
+	int retval = 0;
+	static unsigned char count_flag = 0;
+        struct i2c_client *client = container_of(dev, struct i2c_client, dev);
+	struct cyttsp *ts = i2c_get_clientdata(client);
+
+	if (size > 2)
+		return -EINVAL;
+
+	retval = strict_strtoul(buf, 10, &value);
+
+	if(retval == 0)
+	{
+		if( (value == 1) &&
+			(fw_update_flag == 0 ))
+		{
+			printk("cyttsp:%s:Trigger FW upgrade : %d\n",__FUNCTION__,count_flag);
+			fw_update_flag = 1;
+			printk("cyttsp: schedule upgrade\n");
+			INIT_WORK(&ts->update_work, cyttsp_update_worker);
+			queue_work(cyttsp_ts_wq, &ts->update_work);
+			count_flag = 1;
+		} else {
+			printk("cyttsp:%s:Nothing to do\n",__FUNCTION__);
+		}
+	}
+	return size;
+
+}
+
+static ssize_t ttsp_fwupdate_show(struct device *dev,
+				struct device_attribute *attr, char *buf)
+{
+	if( fw_update_flag == 1)
+	{
+		printk("cyttsp:%s:Update in process\n",__FUNCTION__);
+	} else {
+		printk("cyttsp:%s: Update not in process\n",__FUNCTION__);
+	}
+	sprintf(&buf[0],"%02X\n",fw_update_flag);
+	return 4;
+}
 
 /* sysfs */
 static DEVICE_ATTR(idac, S_IRUGO|S_IWUSR, ttsp_idac_show, ttsp_idac_store);
@@ -2053,7 +2044,7 @@ static DEVICE_ATTR(sig, S_IRUGO|S_IWUSR, ttsp_sig_show, ttsp_sig_store);
 static DEVICE_ATTR(rawbase, S_IRUGO|S_IWUSR, ttsp_rawbase_show, ttsp_rawbase_store);
 static DEVICE_ATTR(tpfwver, S_IRUGO|S_IWUSR, ttsp_tpfwver_show, ttsp_tpfwver_store);
 static DEVICE_ATTR(forcecal, S_IRUGO|S_IWUSR, ttsp_forcecal_show, ttsp_forcecal_store);
-
+static DEVICE_ATTR(fwupdate, S_IRUGO|S_IWUSR, ttsp_fwupdate_show, ttsp_fwupdate_store);
 
 static struct attribute *ttsp_attributes[] = {
 	&dev_attr_idac.attr,
@@ -2061,6 +2052,7 @@ static struct attribute *ttsp_attributes[] = {
 	&dev_attr_rawbase.attr,
 	&dev_attr_tpfwver.attr,
 	&dev_attr_forcecal.attr,
+	&dev_attr_fwupdate.attr,
 	NULL
 };
 
@@ -2145,18 +2137,6 @@ static int cyttsp_power_on(struct cyttsp *ts)
                 if(retval < 0){
                         printk("\ncyttsp: - line %d: i2c not ready\n",__LINE__);
                 }
-
-		tries = 0;
-		do {
-			cyttsp_putbl(ts, 4, true, false, false);
-			cyttsp_info("BL%d: f=%02X s=%02X err=%02X bl=%02X%02X bld=%02X%02X\n", \
-				104, \
-				g_bl_data.bl_file, g_bl_data.bl_status, \
-				g_bl_data.bl_error, \
-				g_bl_data.blver_hi, g_bl_data.blver_lo, \
-				g_bl_data.bld_blver_hi, g_bl_data.bld_blver_lo);
-		} while (GET_BOOTLOADERMODE(g_bl_data.bl_status) &&
-			tries++ < 10);
 	}
 
 
@@ -2433,10 +2413,33 @@ static int cyttsp_initialize(struct i2c_client *client, struct cyttsp *ts)
 	mutex_lock(&thread_mutex);
 
 	/* Set up update worker thread, which will unlock the mutex when done */
-        INIT_WORK(&ts->update_work, cyttsp_update_worker);
+        INIT_WORK(&ts->init_work, cyttsp_init_worker);
 
 	/* Prepare our worker structure prior to setting up the timer/ISR */
         INIT_WORK(&ts->work, cyttsp_xy_worker);
+
+	/* Interrupt setup */
+	if (ts->client->irq) {
+		cyttsp_info("Setting up interrupt %d\n",ts->client->irq);
+
+		/* request_irq() will call enable_irq() */
+		retval = request_irq(ts->client->irq,
+				cyttsp_irq,
+				IRQF_TRIGGER_FALLING,
+				ts->client->dev.driver->name,
+				ts);
+
+		if (retval) {
+			cyttsp_alert("error: could not request irq\n");
+			free_irq(ts->client->irq, ts);
+		}
+	}
+
+	irq_cnt = 0;
+	irq_cnt_total = 0;
+	irq_err_cnt = 0;
+
+	atomic_set(&ts->irq_enabled, 1);
 
 	err = sysfs_create_group(&client->dev.kobj, &ttsp_attribute_group);
 	if (err){
@@ -2454,7 +2457,7 @@ static int cyttsp_initialize(struct i2c_client *client, struct cyttsp *ts)
         }
 
 
-	queue_work(cyttsp_ts_wq, &ts->update_work);
+	queue_work(cyttsp_ts_wq, &ts->init_work);
 
 	goto success;
 
@@ -2474,7 +2477,7 @@ success:
 static int __devinit cyttsp_probe(struct i2c_client *client,
 			const struct i2c_device_id *id)
 {
-	struct cyttsp *ts = NULL;
+	struct cyttsp *ts;
 	int error;
 	int retval = CY_OK;
 	
@@ -2485,40 +2488,37 @@ static int __devinit cyttsp_probe(struct i2c_client *client,
 		goto exit;
 	}
 	
-    ts = kzalloc(sizeof(struct cyttsp), GFP_KERNEL);
+	ts = kzalloc(sizeof(struct cyttsp), GFP_KERNEL);
 	if (ts == NULL) {
 		cyttsp_xdebug1("err kzalloc for cyttsp\n");
 		retval = -ENOMEM;
-        goto err0;
+		goto err0;
 	}
 
 	/* allocate and clear memory */
-#ifdef CONFIG_MACH_ENCORE
-    ts->reg = regulator_get(NULL, "vtp");
+	ts->reg = regulator_get(NULL, "vtp");
 
-    if (IS_ERR(ts->reg)) {
-        cyttsp_xdebug1("failed to get vtp regulator\n");
-        retval = IS_ERR(ts->reg);
-        goto err1;
-    }
+	if (IS_ERR(ts->reg)) {
+		printk("cyttsp:failed to get vtp regulator\n");
+		retval = IS_ERR(ts->reg);
+		goto err1;
+	}
 
-    retval = regulator_enable(ts->reg);
+	retval = regulator_enable(ts->reg);
 
-    if (retval) {
-        cyttsp_xdebug1("failed to enable regulator\n");
-        goto err2;
-    }
-
-#endif /* CONFIG_MACH_ENCORE */
+	if (retval) {
+		printk("cyttsp:failed to enable regulator\n");
+		goto err2;
+	}
 	#define OMAP_CYTTSP_RESET_GPIO 46
 	mdelay(100);
-	cyttsp_info("Reseting TMA340\n");	
+	printk("cyttsp:Reseting TMA340\n");	
 	gpio_direction_output(OMAP_CYTTSP_RESET_GPIO, 0);
 	mdelay(10);
 	gpio_direction_output(OMAP_CYTTSP_RESET_GPIO, 1);
 	mdelay(100); //TODO: Delay is needed for chip to reset but may not need 100.
 
-	cyttsp_info("Start Probe 1.2\n");
+	printk("cyttsp:Start Probe 1.2\n");
 	
 	//TODO: temp. needed to determine TP type (tma340 or tmg120)
 	//TODO: To be removed once tmg120 is not supported.
@@ -2530,7 +2530,7 @@ static int __devinit cyttsp_probe(struct i2c_client *client,
 		rc = i2c_master_send(client, &buf, 1);
 		rc = i2c_master_recv(client, &buf, 1);
 		if (rc < 0){
-			printk("No TMA340 found; exiting probe.\n");
+			printk("cyttsp:No TMA340 found; exiting probe.\n");
 			retval = -ENODEV;		
 			// free resources
 			goto err3;
@@ -2580,21 +2580,13 @@ static int __devinit cyttsp_probe(struct i2c_client *client,
 #endif /* CONFIG_HAS_EARLYSUSPEND */
 
 exit:
-	cyttsp_info("Start Probe %s\n", \
+	printk("cyttsp:Start Probe %s\n", \
 		(retval < CY_OK) ? "FAIL" : "PASS");
 
 	if(retval>0)
 	{
 		retval = 0;
 	}
-
-	// let the driver sleep and wake up again to fix first startup sluginess
-	if (ts) {
-		cyttsp_suspend(ts->client, PMSG_SUSPEND);
-		msleep(100);
-		cyttsp_resume(ts->client);
-	}
-
 
 	return retval;
 err3:
@@ -2605,7 +2597,7 @@ err1:
     kfree(ts);
 err0:
     cyttsp_dev_init(0);
-    cyttsp_alert("probe failed: %d\n", retval);
+    printk("cyttsp:probe failed: %d\n", retval);
     return retval;
 }
 
@@ -2658,6 +2650,10 @@ static int cyttsp_suspend(struct i2c_client *client, pm_message_t message)
 	cyttsp_debug("Enter Sleep\n");
 	ts = (struct cyttsp *) i2c_get_clientdata(client);
 
+	/* finish any work already scheduled,
+	 * this is important for fw update */
+	flush_workqueue(cyttsp_ts_wq);
+
 	/* disable worker */
 	if (ts->client->irq == 0)
 		del_timer(&ts->timer);
@@ -2669,33 +2665,15 @@ static int cyttsp_suspend(struct i2c_client *client, pm_message_t message)
 	if (retval)
 		enable_irq(ts->client->irq);
 
-#ifdef CONFIG_MACH_ENCORE
-    retval = regulator_disable(ts->reg);
-#else
-	if (!(retval < CY_OK)) {
-		if (ts->platform_data->use_sleep &&
-			(ts->platform_data->power_state == CY_ACTIVE_STATE)) {
-			if (ts->platform_data->use_sleep & CY_USE_DEEP_SLEEP_SEL)
-				sleep_mode = CY_DEEP_SLEEP_MODE;
-			else
-				sleep_mode = CY_LOW_PWR_MODE;
-
-			retval = i2c_smbus_write_i2c_block_data(ts->client,
-				CY_REG_BASE,
-				sizeof(sleep_mode), &sleep_mode);
-		}
-	}
-#endif /* CONFIG_MACH_ENCORE */
+	retval = regulator_disable(ts->reg);
 
 	if (!(retval < CY_OK)) {
 		if (sleep_mode == CY_DEEP_SLEEP_MODE)
 			ts->platform_data->power_state = CY_SLEEP_STATE;
 		else if (sleep_mode == CY_LOW_PWR_MODE)
 			ts->platform_data->power_state = CY_LOW_PWR_STATE;
-#ifdef CONFIG_MACH_ENCORE
-        else // is off
-            ts->platform_data->power_state = CY_POWER_OFF_STATE;
-#endif /* CONFIG_MACH_ENCORE */
+		else // is off
+			ts->platform_data->power_state = CY_POWER_OFF_STATE;
 	}
 
 	cyttsp_debug("Sleep Power state is %s\n", \
@@ -2721,7 +2699,7 @@ static int __devexit cyttsp_remove(struct i2c_client *client)
 	device_remove_file(&ts->client->dev, &dev_attr_irq_enable);
 
 	/* Remove update work if still scheduled */
-	cancel_work_sync(&ts->update_work);
+	cancel_work_sync(&ts->init_work);
 
 	/* Start cleaning up by removing any delayed work and the timer */
 	if (cancel_delayed_work((struct delayed_work *)&ts->work) < CY_OK)
@@ -2739,13 +2717,11 @@ static int __devexit cyttsp_remove(struct i2c_client *client)
 	unregister_early_suspend(&ts->early_suspend);
 #endif /* CONFIG_HAS_EARLYSUSPEND */
 
-#ifdef CONFIG_MACH_ENCORE
-    if (ts->platform_data->power_state != CY_POWER_OFF_STATE) {
-        regulator_disable(ts->reg);
-    }
+	if (ts->platform_data->power_state != CY_POWER_OFF_STATE) {
+		regulator_disable(ts->reg);
+	}
 
-    regulator_put(ts->reg);
-#endif /* CONFIG_MACH_ENCORE */
+	regulator_put(ts->reg);
 
 	/* housekeeping */
 	sysfs_remove_group(&client->dev.kobj, &ttsp_attribute_group);

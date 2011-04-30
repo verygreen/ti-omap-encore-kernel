@@ -19,9 +19,7 @@
 #include <linux/workqueue.h>
 #include <linux/err.h>
 #include <linux/clk.h>
-#ifdef CONFIG_TOUCHSCREEN_CYTTSP_I2C
 #include <linux/cyttsp.h>
-#endif
 
 #ifdef CONFIG_INPUT_KXTF9
 #include <linux/kxtf9.h>
@@ -98,9 +96,9 @@
 
 #ifdef CONFIG_TOUCHSCREEN_CYTTSP_I2C
 /* tma340 i2c address */
-#define CYTTSP_I2C_SLAVEADDRESS 34
-#define OMAP_CYTTSP_GPIO        99
-#define OMAP_CYTTSP_RESET_GPIO 46
+#define CYTTSP_I2C_SLAVEADDRESS	34
+#define OMAP_CYTTSP_GPIO	99
+#define OMAP_CYTTSP_RESET_GPIO	46
 #endif
 
 #define CONFIG_DISABLE_HFCLK 1
@@ -779,8 +777,6 @@ static struct twl4030_platform_data __refdata boxer_twldata = {
 };
 
 
-#ifdef CONFIG_TOUCHSCREEN_CYTTSP_I2C
-
 int  cyttsp_dev_init(int resource) 
 {
 	if (resource)
@@ -837,7 +833,6 @@ static struct cyttsp_platform_data cyttsp_platform_data = {
 	.lp_intrvl = CY_LP_INTRVL_DFLT,
 };
 
-#endif
 
 #if 0
 // This code is yanked from arch/arm/mach-omap2/prcm.c
@@ -1031,13 +1026,11 @@ static void audio_dac_3100_dev_init(void)
 }
 #endif
 static struct i2c_board_info __initdata boxer_i2c_bus2_info[] = {
-#ifdef CONFIG_TOUCHSCREEN_CYTTSP_I2C
 	{
         I2C_BOARD_INFO(CY_I2C_NAME, CYTTSP_I2C_SLAVEADDRESS),
         .platform_data = &cyttsp_platform_data,
         .irq = OMAP_GPIO_IRQ(OMAP_CYTTSP_GPIO),
 	},
-#endif
 
 #if defined(CONFIG_SND_SOC_TLV320DAC3100) || defined(CONFIG_SND_SOC_TLV320DAC310_MODULE)
 	{

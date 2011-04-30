@@ -38,6 +38,10 @@
 
 #define TWL4030_MADC_PFX	"twl4030-madc: "
 
+#define R_GPBR1				0x0c
+#define GPBR1_MADC_HFCLK_EN		(1u << 7)
+#define GPBR1_DEFAULT_MADC_CLK_EN	(1u << 4)
+
 struct twl4030_madc_data {
 	struct device		*dev;
 	struct mutex		lock;
@@ -356,6 +360,24 @@ static int twl4030_madc_set_current_generator(struct twl4030_madc_data *madc,
 	return ret;
 }
 
+
+/*
+ * Explicitly control MADC clock. This is needed if battery power is not
+ * managed by the PMIC, in which case MADC clock must be managed by the
+ * MADC driver itself.
+ */
+static void twl4030_madc_clock(int on)
+{
+	uint8_t val;
+
+	twl_i2c_read_u8(TWL4030_MODULE_INTBR, &val, R_GPBR1);
+	if (on)
+		val |= GPBR1_DEFAULT_MADC_CLK_EN | GPBR1_MADC_HFCLK_EN;
+	else
+		val &= ~(GPBR1_DEFAULT_MADC_CLK_EN | GPBR1_MADC_HFCLK_EN);
+	twl_i2c_write_u8(TWL4030_MODULE_INTBR, val, R_GPBR1);
+}
+
 static int twl4030_madc_set_power(struct twl4030_madc_data *madc, int on)
 {
 	u8 regval;
@@ -456,6 +478,7 @@ static int __init twl4030_madc_probe(struct platform_device *pdev)
 		goto err_misc;
 	}
 	twl4030_madc_set_power(madc, 1);
+	twl4030_madc_clock(1);
 	twl4030_madc_set_current_generator(madc, 0, 1);
 
 	ret = twl_i2c_read_u8(TWL4030_MODULE_MAIN_CHARGE,
@@ -495,6 +518,7 @@ static int __exit twl4030_madc_remove(struct platform_device *pdev)
 {
 	struct twl4030_madc_data *madc = platform_get_drvdata(pdev);
 
+	twl4030_madc_clock(0);
 	twl4030_madc_set_power(madc, 0);
 	twl4030_madc_set_current_generator(madc, 0, 0);
 	free_irq(platform_get_irq(pdev, 0), madc);
