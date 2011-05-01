@@ -167,7 +167,7 @@ static void FlushInternalSyncQueue(OMAPLFB_SWAPCHAIN *psSwapChain)
 		if(psFlipItem->bFlipped == OMAP_FALSE)
 		{
 			OMAPLFBFlip(psSwapChain,
-				(unsigned long)psFlipItem->sSysAddr);
+				(unsigned long)psFlipItem->sSysAddr->uiAddr);
 		}
 
 		/* If the command didn't complete, assume it did */
@@ -1046,7 +1046,6 @@ static void OMAPLFBSyncIHandler(struct work_struct *work)
 			psSwapChain->ulRemoveIndex++;
 			if (psSwapChain->ulRemoveIndex > ulMaxIndex)
 				psSwapChain->ulRemoveIndex = 0;
-			psFlipItem->bCmdCompleted = OMAP_FALSE;
 			psFlipItem->bFlipped = OMAP_FALSE;
 			psFlipItem->bValid = OMAP_FALSE;
 
@@ -1151,6 +1150,7 @@ static IMG_BOOL ProcessFlip(IMG_HANDLE  hCmdCookie,
 			(unsigned long)psFlipCmd->ui32SwapInterval;
 		psFlipItem->sSysAddr = &psBuffer->sSysAddr;
 		psFlipItem->bValid = OMAP_TRUE;
+		psFlipItem->bCmdCompleted = OMAP_FALSE;
 
 		psSwapChain->ulInsertIndex++;
 		if(psSwapChain->ulInsertIndex > ulMaxIndex)
