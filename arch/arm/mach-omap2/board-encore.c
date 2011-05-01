@@ -100,13 +100,8 @@
 #define OMAP_CYTTSP_GPIO	99
 #define OMAP_CYTTSP_RESET_GPIO	46
 #endif
+#define LCD_EN_GPIO		36
 
-#define CONFIG_DISABLE_HFCLK 1
-#define ENABLE_VAUX1_DEDICATED	0x03
-#define ENABLE_VAUX1_DEV_GRP	0x20
-
-#define ENABLE_VAUX3_DEDICATED  0x03
-#define ENABLE_VAUX3_DEV_GRP	0x20
 #define TWL4030_MSECURE_GPIO	22
 
 #define WL127X_BTEN_GPIO	60
@@ -183,303 +178,12 @@ static struct platform_device boxer_keys_gpio = {
 	},
 };
 
-static struct omap2_mcspi_device_config boxer_lcd_mcspi_config = {
-	.turbo_mode		= 0,
-	.single_channel		= 1,
-};
-
-static struct spi_board_info boxer_spi_board_info[] __initdata = {
-	[0] = {
-		.modalias		= "boxer_disp_spi",
-		.bus_num		= 4,	/* McSPI4 */
-		.chip_select		= 0,
-		.max_speed_hz		= 375000,
-		.controller_data	= &boxer_lcd_mcspi_config,
-	},
-};
-
-#define LCD_EN_GPIO                     36
-#define LCD_BACKLIGHT_GPIO              58
-#define LCD_BACKLIGHT_EN_EVT2           47
-
-#define LCD_CABC0_GPIO					44
-#define LCD_CABC1_GPIO					45
-
-#define PM_RECEIVER			TWL4030_MODULE_PM_RECEIVER
-#define ENABLE_VAUX2_DEDICATED		0x09
-#define ENABLE_VAUX2_DEV_GRP		0x20
-#define ENABLE_VAUX3_DEDICATED		0x03
-#define ENABLE_VAUX3_DEV_GRP		0x20
-
-#define ENABLE_VPLL2_DEDICATED          0x05
-#define ENABLE_VPLL2_DEV_GRP            0xE0
-#define TWL4030_VPLL2_DEV_GRP           0x33
-#define TWL4030_VPLL2_DEDICATED         0x36
-
-#define t2_out(c, r, v) twl_i2c_write_u8(c, r, v)
-
-// Panel on completion to signal when panel is on.
-static DECLARE_COMPLETION(panel_on);
-
-static int boxer_panel_enable_lcd(struct omap_dss_device *dssdev)
-{
-	complete_all(&panel_on);	
-	//omap_pm_set_min_bus_tput(&dssdev->dev, OCP_INITIATOR_AGENT,166 * 1000 * 4);
-	return 0;
-}
-
-static void boxer_panel_disable_lcd(struct omap_dss_device *dssdev)
-{
-	INIT_COMPLETION(panel_on);
-	/* disabling LCD on Boxer EVT1 shuts down SPI bus, so don't touch! */
-    omap_pm_set_min_bus_tput(&dssdev->dev, OCP_INITIATOR_AGENT, 0);
-}
-
-/* EVT1 is connected to full 24 bit display panel so gamma table correction */
-/* is only to compensate for LED backlight color */
-/*
- * omap2dss - fixed size: 256 elements each four bytes / XRGB
- */
-#define RED_MASK 	0x00FF0000
-#define GREEN_MASK 	0x0000FF00
-#define BLUE_MASK	0x000000FF
-#define RED_SHIFT	16
-#define GREEN_SHIFT	8
-#define BLUE_SHIFT	0
-#define MAX_COLOR_DEPTH	255
-
-static const u8 led_color_correction_samsung[256]=
-{
-0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,
-10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,
-20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,
-20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,
-25,25,25,25,25,25,25,25,25,25,25,25,25,25,25,25,
-25,25,25,25,25,25,25,25,25,25,25,25,25,25,25,25,
-30,30,30,30,30,30,30,30,30,30,30,30,30,30,30,30,
-30,30,30,30,30,30,30,30,30,30,30,30,30,30,30,30,
-25,25,25,25,25,25,25,25,25,25,25,25,25,25,25,25,
-25,25,25,25,25,25,25,25,25,25,25,25,25,25,25,25,
-20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,
-20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,
-20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,
-15,15,15,15,15,15,15,10,10,10,10,10,10,9,8,7,
-6,5,4,4,2,2,2,2,2,2,1,1,1,1,0,0,
-};
-
-static const u8 led_color_correction_nichia[256]=
-{
-0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,
-10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,
-20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,
-20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,
-25,25,25,25,25,25,25,25,25,25,25,25,25,25,25,25,
-25,25,25,25,25,25,25,25,25,25,25,25,25,25,25,25,
-30,30,30,30,30,30,30,30,30,30,30,30,30,30,30,30,
-30,30,30,30,30,30,30,30,30,30,30,30,30,30,30,30,
-25,25,25,25,25,25,25,25,25,25,25,25,25,25,25,25,
-25,25,25,25,25,25,25,25,25,25,25,25,25,25,25,25,
-20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,
-20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,
-20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,
-15,15,15,15,15,15,15,10,10,10,10,10,10,9,8,7,
-6,5,4,4,2,2,2,2,2,2,1,1,1,1,0,0,
-};
-
-/* Use the Samsung table as the default */
-static const u8 *color_component_correction = led_color_correction_samsung;
-
-/* Select the appropriate gamma table based on the LED backlight attached */
-static int __init get_backlighttype(char *str)
-{
-	if (!strcmp(str, "1476AY")) {
-		printk("LED backlight type set to Nichia\n");
-		color_component_correction = led_color_correction_nichia;
-	}
-	/* Samsung will have the value 1577AS, but since Samsung is the */
-	/* default, nothing needs to be done here */
-	return 1;
-}
-
-__setup("backlighttype=", get_backlighttype);
-
-static int boxer_clut_fill(void * ptr, u32 size)
-{
-	u16 count;
-	u32 temp;
-	u32 *byte = (u32 *)ptr;
-	u16 color_corrected_value;
-	u8 red, green, blue;
-	for (count = 0; count < size / sizeof(u32); count++) {
-	  red   = count;
-	  green = count;
-	  blue  = count;
-	  color_corrected_value = color_component_correction[count]+blue;
-	  color_corrected_value = (color_corrected_value >= MAX_COLOR_DEPTH) ? MAX_COLOR_DEPTH:color_corrected_value; 
-	  temp = (((red << RED_SHIFT) & RED_MASK) | ((green << GREEN_SHIFT) & GREEN_MASK) | ((color_corrected_value << BLUE_SHIFT) & BLUE_MASK));
-	  *byte++ = temp;
-	}
-	return 0;
-}
-
-static struct omap_dss_device boxer_lcd_device = {
-	.name = "lcd",
-	.driver_name = "boxer_panel",
-	.type = OMAP_DISPLAY_TYPE_DPI,
-	.phy.dpi.data_lines = 24,
-	.platform_enable	= boxer_panel_enable_lcd,
-	.platform_disable	= boxer_panel_disable_lcd,
-//	.clut_size		= sizeof(u32) * 256,
-//	.clut_fill		= boxer_clut_fill,
- };
-/* Roberto and JM comments: we could disable panel TV output for Boxer EVT1 board purposes*/
-
-static int boxer_panel_enable_tv(struct omap_dss_device *dssdev)
-{
-#define ENABLE_VDAC_DEDICATED           0x03
-#define ENABLE_VDAC_DEV_GRP             0x20
-
-	twl_i2c_write_u8(TWL4030_MODULE_PM_RECEIVER,
-			ENABLE_VDAC_DEDICATED,
-			TWL4030_VDAC_DEDICATED);
-	twl_i2c_write_u8(TWL4030_MODULE_PM_RECEIVER,
-			ENABLE_VDAC_DEV_GRP, TWL4030_VDAC_DEV_GRP);
-
-	return 0;
-}
-
-static void boxer_panel_disable_tv(struct omap_dss_device *dssdev)
-{
-	twl_i2c_write_u8(TWL4030_MODULE_PM_RECEIVER, 0x00,
-			TWL4030_VDAC_DEDICATED);
-	twl_i2c_write_u8(TWL4030_MODULE_PM_RECEIVER, 0x00,
-			TWL4030_VDAC_DEV_GRP);
-}
-static struct omap_dss_device boxer_tv_device = {
-	.name = "tv",
-	.driver_name = "venc",
-	.type = OMAP_DISPLAY_TYPE_VENC,
-	.phy.venc.type = OMAP_DSS_VENC_TYPE_COMPOSITE,
-	.platform_enable = boxer_panel_enable_tv,
-	.platform_disable = boxer_panel_disable_tv,
-};
-
-static struct omap_dss_device *boxer_dss_devices[] = {
-	&boxer_lcd_device,
-	&boxer_tv_device,
-};
-
-static struct omap_dss_board_info boxer_dss_data = {
-//	.get_last_off_on_transaction_id = get_last_off_on_transaction_id,
-	.num_devices = ARRAY_SIZE(boxer_dss_devices),
-	.devices = boxer_dss_devices,
-	.default_device = &boxer_lcd_device,
-};
-
-static struct platform_device boxer_dss_device = {
-	.name          = "omapdss",
-	.id            = -1,
-	.dev            = {
-		.platform_data = &boxer_dss_data,
-	},
-};
-
-static struct regulator_consumer_supply boxer_vdda_dac_supply = {
-	.supply		= "vdda_dac",
-	.dev		= &boxer_dss_device.dev,
-};
-
-#ifdef CONFIG_FB_OMAP2
-static struct resource boxer_vout_resource[2] = { };
-//static struct resource boxer_vout_resource[3 - CONFIG_FB_OMAP2_NUM_FBS] = {
-//};
-#else
-static struct resource boxer_vout_resource[2] = {
-};
-#endif
-
-#ifdef CONFIG_PM
-struct vout_platform_data boxer_vout_data = {
-	.set_min_bus_tput = omap_pm_set_min_bus_tput,
-	.set_max_mpu_wakeup_lat =  omap_pm_set_max_mpu_wakeup_lat,
-	.set_min_mpu_freq = omap_pm_set_min_mpu_freq,
-};
-#endif
-
-static struct platform_device boxer_vout_device = {
-	.name		= "omap_vout",
-	.num_resources	= ARRAY_SIZE(boxer_vout_resource),
-	.resource	= &boxer_vout_resource[0],
-	.id		= -1,
-#ifdef CONFIG_PM
-	.dev		= {
-		.platform_data = &boxer_vout_data,
-	}
-#else
-	.dev		= {
-		.platform_data = NULL,
-	}
-#endif
-};
-
-static void encore_backlight_set_power(struct omap_pwm_led_platform_data *self, int on_off)
-{
-	if (on_off) {
-		// Wait for panel to turn on.
-		wait_for_completion_interruptible(&panel_on);
-
-	    gpio_direction_output(LCD_BACKLIGHT_EN_EVT2, 0);
-        gpio_set_value(LCD_BACKLIGHT_EN_EVT2, 0);
-	} else {
-		gpio_direction_output(LCD_BACKLIGHT_EN_EVT2, 1);
-        gpio_set_value(LCD_BACKLIGHT_EN_EVT2, 1);
-	}
-}
-
-static struct omap_pwm_led_platform_data boxer_backlight_data = {
-	.name = "lcd-backlight",
-	.intensity_timer = 8,
-	.def_on = 0,
-	.def_brightness = DEFAULT_BACKLIGHT_BRIGHTNESS,
-	.blink_timer = 0,
-	.set_power = encore_backlight_set_power, 
-};
-
-static struct platform_device boxer_backlight_led_device = {
-	.name		= "omap_pwm_led",
-	.id		= -1,
-	.dev		= {
-		.platform_data = &boxer_backlight_data,
-	},
-};
-
 #ifdef CONFIG_CHARGER_MAX8903
 static struct platform_device max8903_charger_device = {
 	.name		= "max8903_charger",
 	.id		= -1,
 };
 #endif
-
-static void boxer_backlight_init(void)
-{
-	printk("Enabling backlight PWM for LCD\n");
-
-	boxer_backlight_data.def_on = 1; // change the PWM polarity
-        gpio_request(LCD_BACKLIGHT_EN_EVT2, "lcd backlight evt2");
-
-//	omap_cfg_reg(N8_34XX_GPIO58_PWM);
-	omap_mux_init_gpio(58, OMAP_PIN_OUTPUT);
-
-	gpio_request(LCD_CABC0_GPIO, "lcd CABC0");
-	gpio_direction_output(LCD_CABC0_GPIO,0);
-	gpio_set_value(LCD_CABC0_GPIO,0);
-
-	gpio_request(LCD_CABC1_GPIO, "lcd CABC1");
-	gpio_direction_output(LCD_CABC1_GPIO,0);
-	gpio_set_value(LCD_CABC1_GPIO,0);
-}
 
 static struct regulator_consumer_supply boxer_vlcdtp_supply[] = {
     { .supply = "vlcd" },
@@ -539,19 +243,16 @@ static struct platform_device *boxer_devices[] __initdata = {
     &boxer_ram_console_device,
 #endif
     &boxer_lcd_touch_regulator_device,    
-	&boxer_dss_device,
-	&boxer_backlight_led_device,
 	&boxer_keys_gpio,
 #ifdef CONFIG_WL127X_RFKILL
 	&encore_wl127x_device,
 #endif
-	&boxer_vout_device,
 #ifdef CONFIG_CHARGER_MAX8903
 	&max8903_charger_device,
 #endif
 };
 
-static void __init omap_boxer_init_irq(void)
+static void __init omap_encore_init_irq(void)
 {
 	omap_init_irq();
 	omap2_init_common_hw(	h8mbx00u0mer0em_sdrc_params , NULL,
@@ -577,19 +278,6 @@ static struct regulator_init_data boxer_vmmc1 = {
 	},
 	.num_consumer_supplies  = 1,
 	.consumer_supplies      = &boxer_vmmc1_supply,
-};
-
-static struct regulator_init_data boxer_vdac = {
-	.constraints = {
-		.min_uV                 = 1800000,
-		.max_uV                 = 1800000,
-		.valid_modes_mask       = REGULATOR_MODE_NORMAL
-					| REGULATOR_MODE_STANDBY,
-		.valid_ops_mask         = REGULATOR_CHANGE_MODE
-					| REGULATOR_CHANGE_STATUS,
-	},
-	.num_consumer_supplies  = 1,
-	.consumer_supplies      = &boxer_vdda_dac_supply,
 };
 
 static struct twl4030_hsmmc_info mmc[] __initdata = {
@@ -773,7 +461,6 @@ static struct twl4030_platform_data __refdata boxer_twldata = {
 	.keypad		= &boxer_kp_twl4030_data,
 	.power		= &boxer_t2scripts_data,
 	.vmmc1          = &boxer_vmmc1,
-	.vdac		= &boxer_vdac,
 };
 
 
@@ -1129,13 +816,12 @@ static struct omap_board_mux board_mux[] __initdata = {
 #define board_mux       NULL
 #endif
 
+extern void evt_lcd_panel_init(void);
 
-static void __init omap_boxer_init(void)
+static void __init omap_encore_init(void)
 {
 	omap3_mux_init(board_mux, OMAP_PACKAGE_CBB);
 	twl4030_get_scripts(&boxer_t2scripts_data);
-	/*we need to have this enable function here to light up the BL*/
-	boxer_panel_enable_lcd(&boxer_lcd_device);
 	omap_i2c_init();
 	/* Fix to prevent VIO leakage on wl127x */
 //	wl127x_vio_leakage_fix();
@@ -1145,10 +831,8 @@ static void __init omap_boxer_init(void)
 	omap_board_config = boxer_config;
 	omap_board_config_size = ARRAY_SIZE(boxer_config);
 
-	spi_register_board_info(boxer_spi_board_info,
-				ARRAY_SIZE(boxer_spi_board_info));
-
 	omap_serial_init();
+	evt_lcd_panel_init();
 	usb_musb_init(&musb_board_data);
 
 #ifdef CONFIG_INPUT_KXTF9
@@ -1162,7 +846,6 @@ static void __init omap_boxer_init(void)
 #if defined(CONFIG_SND_SOC_TLV320DAC3100) || defined(CONFIG_SND_SOC_TLV320DAC310_MODULE)
         audio_dac_3100_dev_init();
 #endif
-	boxer_backlight_init();
 
 #if defined(CONFIG_USB_ANDROID) || defined(CONFIG_USB_ANDROID_MODULE)
 #if defined(CONFIG_USB_ANDROID_MASS_STORAGE)
@@ -1172,7 +855,7 @@ static void __init omap_boxer_init(void)
         BUG_ON(!cpu_is_omap3630());
 }
 
-static void __init omap_boxer_map_io(void)
+static void __init omap_encore_map_io(void)
 {
 #ifdef CONFIG_ANDROID_RAM_CONSOLE
     reserve_bootmem(BOXER_RAM_CONSOLE_START, BOXER_RAM_CONSOLE_SIZE, 0);
@@ -1188,8 +871,8 @@ MACHINE_START(ENCORE, "encore")
 	.phys_io	= BOXER_EXT_QUART_PHYS,
 	.io_pg_offst	= ((BOXER_EXT_QUART_VIRT) >> 18) & 0xfffc,
 	.boot_params	= 0x80000100,
-	.map_io		= omap_boxer_map_io,
-	.init_irq	= omap_boxer_init_irq,
-	.init_machine	= omap_boxer_init,
+	.map_io		= omap_encore_map_io,
+	.init_irq	= omap_encore_init_irq,
+	.init_machine	= omap_encore_init,
 	.timer		= &omap_timer,
 MACHINE_END

@@ -23,14 +23,14 @@
 #include <linux/module.h>
 #include <linux/delay.h>
 #include <linux/platform_device.h>
-#include <linux/i2c/twl.h>
 #include <linux/spi/spi.h>
 #include <linux/regulator/consumer.h>
 #include <linux/err.h>
 #include <linux/workqueue.h>
 
 #include <plat/mcspi.h>
-#include <plat/gpio.h>
+#include <mach/gpio.h>
+#include <mach/gpio.h>
 #include <plat/mux.h>
 #include <asm/mach-types.h>
 #include <plat/control.h>
@@ -49,7 +49,7 @@
 #define LCD_PIXCLOCK_MAX	52000 /* Maximum is 52MHz */
 
 /* Current Pixel clock */
-#define LCD_PIXEL_CLOCK		68000
+#define LCD_PIXEL_CLOCK		48000
 
 static struct workqueue_struct *boxer_panel_wq;
 static struct omap_dss_device *boxer_panel_dssdev;
@@ -74,14 +74,22 @@ static struct omap_video_timings boxer_panel_timings = {
 	.vbp            = 11,//25,
 };
 
+static void boxer_get_resolution(struct omap_dss_device *dssdev,
+		u16 *xres, u16 *yres)
+{
+
+		*xres = dssdev->panel.timings.x_res;
+		*yres = dssdev->panel.timings.y_res;
+}
+
 
 static int boxer_panel_probe(struct omap_dss_device *dssdev)
 {
-printk("lcd probe\n");
-
 	dssdev->panel.config = OMAP_DSS_LCD_TFT | OMAP_DSS_LCD_IVS |
 			       OMAP_DSS_LCD_IHS | OMAP_DSS_LCD_IPC;
 	dssdev->panel.timings = boxer_panel_timings;
+	dssdev->get_resolution = boxer_get_resolution;
+	dssdev->panel.recommended_bpp = 24;
 	return 0;
 }
 
@@ -141,7 +149,8 @@ static void boxer_init_panel(void)
 
 static void boxer_panel_work_func(struct work_struct *work)
 {
-	regulator_enable(boxer_panel_regulator);
+	if (!regulator_is_enabled(boxer_panel_regulator))
+		regulator_enable(boxer_panel_regulator);
 
 	msleep(LCD_RST_DELAY);
 
@@ -177,7 +186,8 @@ static void boxer_panel_disable(struct omap_dss_device *dssdev)
 		if (dssdev->platform_disable)
 			dssdev->platform_disable(dssdev);
 
-		regulator_disable(boxer_panel_regulator);
+		if (regulator_is_enabled(boxer_panel_regulator))
+			regulator_disable(boxer_panel_regulator);
     } else {
         printk("%s: attempting to disable panel twice!\n", __FUNCTION__);
         WARN_ON(1);
@@ -316,7 +326,6 @@ static int __init boxer_lcd_init(void)
         goto out;
     }
 
-    atomic_inc(&boxer_panel_is_enabled);
 	return spi_register_driver(&boxer_spi_driver);
 out:
     return ret;
