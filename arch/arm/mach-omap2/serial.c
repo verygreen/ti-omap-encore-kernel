@@ -19,25 +19,28 @@
  */
 #include <linux/kernel.h>
 #include <linux/init.h>
-#include <linux/console.h>
 #include <linux/serial_reg.h>
 #include <linux/clk.h>
 #include <linux/io.h>
 #include <linux/delay.h>
 #include <linux/platform_device.h>
+#include <linux/slab.h>
 #include <linux/serial_8250.h>
-#include <asm/mach-types.h>
+#include <linux/serial_reg.h>
+#include <linux/pm_runtime.h>
+#include <linux/console.h>
 
+#ifdef CONFIG_SERIAL_OMAP
 #include <plat/omap-serial.h>
+#endif
+
 #include <plat/common.h>
 #include <plat/board.h>
 #include <plat/clock.h>
-#include <plat/control.h>
 #include <plat/dma.h>
 #include <plat/omap_hwmod.h>
 #include <plat/omap_device.h>
 
-#include "mux.h"
 #include "prm.h"
 #include "pm.h"
 #include "cm.h"
@@ -46,6 +49,15 @@
 #define UART_OMAP_NO_EMPTY_FIFO_READ_IP_REV	0x52
 #define UART_OMAP_WER		0x17	/* Wake-up enable register */
 
+#define UART_ERRATA_FIFO_FULL_ABORT	(0x1 << 0)
+#define UART_ERRATA_i202_MDR1_ACCESS	(0x1 << 1)
+
+/*
+ * NOTE: By default the serial timeout is disabled as it causes lost characters
+ * over the serial ports. This means that the UART clocks will stay on until
+ * disabled via sysfs. This also causes that any deeper omap sleep states are
+ * blocked. 
+ */
 #define DEFAULT_TIMEOUT (5 * HZ)
 
 #define MAX_UART_HWMOD_NAME_LEN		16
@@ -62,10 +74,6 @@ struct omap_uart_state {
 	u32 padconf;
 	u32 dma_enabled;
 
-	u32 rts_padconf;
-	int rts_override;
-	u16 rts_padvalue;
-
 	struct clk *ick;
 	struct clk *fck;
 	int clocked;
@@ -80,6 +88,7 @@ struct omap_uart_state {
 	struct omap_hwmod *oh;
 	struct platform_device *pdev;
 
+	u32 errata;
 #if defined(CONFIG_ARCH_OMAP3) && defined(CONFIG_PM)
 	int context_valid;
 
@@ -94,48 +103,66 @@ struct omap_uart_state {
 #endif
 };
 
-#if defined(CONFIG_MACH_OMAP_ZOOM3) && defined(CONFIG_PM)
-struct omap_uart_state quart_context;
-#endif
-
 static LIST_HEAD(uart_list);
-
 static u8 num_uarts;
+
+/* lock-free versions from omap_hwmod.c */
+int _omap_hwmod_idle(struct omap_hwmod *oh);
+int _omap_hwmod_enable(struct omap_hwmod *oh);
+
+/*
+ * Since these idle/enable hooks are used in the idle path itself
+ * which has interrupts disabled, use the non-locking versions of
+ * the hwmod enable/disable functions.
+ */
+static int uart_idle_hwmod(struct omap_device *od)
+{
+	_omap_hwmod_idle(od->hwmods[0]);
+
+	return 0;
+}
+
+static int uart_enable_hwmod(struct omap_device *od)
+{
+	_omap_hwmod_enable(od->hwmods[0]);
+
+	return 0;
+}
 
 static struct omap_device_pm_latency omap_uart_latency[] = {
 	{
-		.deactivate_func = omap_device_idle_hwmods,
-		.activate_func   = omap_device_enable_hwmods,
+		.deactivate_func = uart_idle_hwmod,
+		.activate_func	 = uart_enable_hwmod,
 		.flags = OMAP_DEVICE_LATENCY_AUTO_ADJUST,
 	},
 };
 
 static inline unsigned int __serial_read_reg(struct uart_port *up,
-					int offset)
+					     int offset)
 {
 	offset <<= up->regshift;
 	return (unsigned int)__raw_readb(up->membase + offset);
+}
+
+static inline unsigned int serial_read_reg(struct omap_uart_state *uart,
+					   int offset)
+{
+	offset <<= uart->regshift;
+	return (unsigned int)__raw_readb(uart->membase + offset);
 }
 
 static inline void __serial_write_reg(struct uart_port *up, int offset,
-					int value)
+		int value)
 {
 	offset <<= up->regshift;
 	__raw_writeb(value, up->membase + offset);
 }
 
-static inline unsigned int serial_read_reg(struct omap_uart_state *up,
-					   int offset)
-{
-	offset <<= up->regshift;
-	return (unsigned int)__raw_readb(up->membase + offset);
-}
-
-static inline void serial_write_reg(struct omap_uart_state *up, int offset,
+static inline void serial_write_reg(struct omap_uart_state *uart, int offset,
 				    int value)
 {
-	offset <<= up->regshift;
-	__raw_writeb(value, up->membase + offset);
+	offset <<= uart->regshift;
+	__raw_writeb(value, uart->membase + offset);
 }
 
 /*
@@ -144,114 +171,49 @@ static inline void serial_write_reg(struct omap_uart_state *up, int offset,
  * once the 8250.c watermark handling code is merged.
  */
 
-static inline void __init omap_uart_reset(struct omap_uart_state *p)
+static inline void __init omap_uart_reset(struct omap_uart_state *uart)
 {
-	serial_write_reg(p, UART_OMAP_MDR1, 0x07);
-	serial_write_reg(p, UART_OMAP_SCR, 0x08);
-	serial_write_reg(p, UART_OMAP_MDR1, 0x00);
+	serial_write_reg(uart, UART_OMAP_MDR1, UART_OMAP_MDR1_DISABLE);
+	serial_write_reg(uart, UART_OMAP_SCR, 0x08);
+	serial_write_reg(uart, UART_OMAP_MDR1, UART_OMAP_MDR1_16X_MODE);
 }
-
-static inline void omap_uart_disable_rtspullup(struct omap_uart_state *uart)
-{
-	if (!uart->rts_padconf || !uart->rts_override)
-		return;
-	omap_ctrl_writew(uart->rts_padvalue, uart->rts_padconf);
-	uart->rts_override = 0;
-}
-
-static inline void omap_uart_enable_rtspullup(struct omap_uart_state *uart)
-{
-	if (!uart->rts_padconf || uart->rts_override)
-		return;
-
-	uart->rts_padvalue = omap_ctrl_readw(uart->rts_padconf);
-	omap_ctrl_writew(0x118 | 0x7, uart->rts_padconf);
-	uart->rts_override = 1;
-}
-
 
 #if defined(CONFIG_PM) && defined(CONFIG_ARCH_OMAP3)
-#if defined(CONFIG_MACH_OMAP_ZOOM3)
-/* The QUART save and restore are not the same as the OMAP UART
- * registers. Hence these are being made through a different
- * function.
+
+/*
+ * Work Around for Errata i202 (3430 - 1.12, 3630 - 1.6)
+ * The access to uart register after MDR1 Access
+ * causes UART to corrupt data.
+ *
+ * Need a delay =
+ * 5 L4 clock cycles + 5 UART functional clock cycle (@48MHz = ~0.2uS)
+ * give 10 times as much
  */
-static void omap_quart_save_context(struct uart_port *uart,
-				struct omap_uart_state *pquart)
+static void omap_uart_mdr1_errataset(struct omap_uart_state *uart, u8 mdr1_val,
+		u8 fcr_val)
 {
-	u16 lcr = 0;
+	u8 timeout = 255;
 
-	if (!enable_off_mode)
-		return;
-
-	lcr = __serial_read_reg(uart, UART_LCR);
-	/* Config B Mode */
-	__serial_write_reg(uart, UART_LCR, OMAP_UART_LCR_CONF_MDB);
-	pquart->dll = __serial_read_reg(uart, UART_DLL);
-	pquart->dlh = __serial_read_reg(uart, UART_DLM);
-	__serial_write_reg(uart, UART_LCR, lcr);
-	pquart->ier = __serial_read_reg(uart, UART_IER);
-	lcr = __serial_read_reg(uart, UART_LCR);
-	/* Configuration A Mde */
-	__serial_write_reg(uart, UART_LCR, OMAP_UART_LCR_CONF_MDA);
-	pquart->mcr = __serial_read_reg(uart, UART_MCR);
-	/* Config Operation Mode */
-	__serial_write_reg(uart, UART_LCR, OMAP_UART_LCR_CONF_MOPER);
-	__serial_write_reg(uart, UART_IER, 0x0);
-	__serial_write_reg(uart, UART_LCR, lcr);
-
-	pquart->context_valid = 1;
+	serial_write_reg(uart, UART_OMAP_MDR1, mdr1_val);
+	udelay(2);
+	serial_write_reg(uart, UART_FCR, fcr_val | UART_FCR_CLEAR_XMIT |
+			UART_FCR_CLEAR_RCVR);
+	/*
+	 * Wait for FIFO to empty: when empty, RX_FIFO_E bit is 0 and
+	 * TX_FIFO_E bit is 1.
+	 */
+	while (UART_LSR_THRE != (serial_read_reg(uart, UART_LSR) &
+				(UART_LSR_THRE | UART_LSR_DR))) {
+		timeout--;
+		if (!timeout) {
+			/* Should *never* happen. we warn and carry on */
+			dev_crit(&uart->pdev->dev, "Errata i202: timedout %x\n",
+			serial_read_reg(uart, UART_LSR));
+			break;
+		}
+		udelay(1);
+	}
 }
-
-static void omap_quart_restore_context(struct uart_port *uart,
-				struct omap_uart_state *pquart)
-{
-	u16 efr = 0;
-
-	if (!enable_off_mode)
-		return;
-
-	if (!pquart->context_valid)
-		return;
-
-	pquart->context_valid = 0;
-	/* Config B Mode */
-	__serial_write_reg(uart, UART_LCR, OMAP_UART_LCR_CONF_MDB);
-	efr = __serial_read_reg(uart, UART_EFR);
-	__serial_write_reg(uart, UART_EFR, UART_EFR_ECB);
-	/* Operational mode */
-	__serial_write_reg(uart, UART_LCR, OMAP_UART_LCR_CONF_MOPER);
-	__serial_write_reg(uart, UART_IER, 0x0);
-	/* Config B Mode */
-	__serial_write_reg(uart, UART_LCR, OMAP_UART_LCR_CONF_MDB);
-	__serial_write_reg(uart, UART_DLL, pquart->dll);
-	__serial_write_reg(uart, UART_DLM, pquart->dlh);
-	/* Operational mode */
-	__serial_write_reg(uart, UART_LCR, OMAP_UART_LCR_CONF_MOPER);
-	__serial_write_reg(uart, UART_IER, pquart->ier);
-	__serial_write_reg(uart, UART_FCR, 0x51);
-	/* Config A Mode */
-	__serial_write_reg(uart, UART_LCR, OMAP_UART_LCR_CONF_MDA);
-	__serial_write_reg(uart, UART_MCR, pquart->mcr);
-	/* Config B Mode */
-	__serial_write_reg(uart, UART_LCR, OMAP_UART_LCR_CONF_MDB);
-	__serial_write_reg(uart, UART_EFR, efr);
-	__serial_write_reg(uart, UART_LCR, UART_LCR_WLEN8);
-}
-
-void omap_quart_prepare_context(struct uart_port *uart,
-		unsigned int power_state, unsigned int save)
-{
-	if ((power_state == PWRDM_POWER_OFF) && save)
-		/* While Entering Off state, along with Voltage OFF */
-		omap_quart_save_context(uart, &quart_context);
-	else if ((power_state == PWRDM_POWER_OFF) && (save == 0))
-		/* While Exiting Off state, along with Voltage OFF */
-		omap_quart_restore_context(uart, &quart_context);
-	return;
-}
-EXPORT_SYMBOL(omap_quart_prepare_context);
-#endif
 
 static void omap_uart_save_context(struct omap_uart_state *uart)
 {
@@ -261,7 +223,7 @@ static void omap_uart_save_context(struct omap_uart_state *uart)
 		return;
 
 	lcr = serial_read_reg(uart, UART_LCR);
-	serial_write_reg(uart, UART_LCR, 0xBF);
+	serial_write_reg(uart, UART_LCR, UART_LCR_CONF_MODE_B);
 	uart->dll = serial_read_reg(uart, UART_DLL);
 	uart->dlh = serial_read_reg(uart, UART_DLM);
 	serial_write_reg(uart, UART_LCR, lcr);
@@ -269,8 +231,7 @@ static void omap_uart_save_context(struct omap_uart_state *uart)
 	uart->sysc = serial_read_reg(uart, UART_OMAP_SYSC);
 	uart->scr = serial_read_reg(uart, UART_OMAP_SCR);
 	uart->wer = serial_read_reg(uart, UART_OMAP_WER);
-	lcr = serial_read_reg(uart, UART_LCR);
-	serial_write_reg(uart, UART_LCR, 0x80);
+	serial_write_reg(uart, UART_LCR, UART_LCR_CONF_MODE_A);
 	uart->mcr = serial_read_reg(uart, UART_MCR);
 	serial_write_reg(uart, UART_LCR, lcr);
 
@@ -288,65 +249,37 @@ static void omap_uart_restore_context(struct omap_uart_state *uart)
 		return;
 
 	uart->context_valid = 0;
-	if (cpu_is_omap44xx()) {
-		serial_write_reg(uart, UART_OMAP_MDR1, 0x7);
-	} else {
-		/* Disable the UART first, then configure */
-		if (uart->dma_enabled)
-			/* This enables the DMA Mode, the FIFO,the Rx and
-			 * Tx FIFO levels. Keeping the UARt disabled in
-			 * MDR1 Register.
-			 */
-			omap_uart_mdr1_errataset(uart->num, 0x07,
-					(UART_FCR_DMA_SELECT | 0x51));
-		else
-			/* This enables the FIFO, the Rx and Tx FIFO levels.
-			 * Keeping the UARt Disabled in MDR1 Register.
-			 */
-			omap_uart_mdr1_errataset(uart->num, 0x07, 0x51);
-	}
-	serial_write_reg(uart, UART_LCR, 0xBF); /* Config B mode */
+
+	if (uart->errata & UART_ERRATA_i202_MDR1_ACCESS)
+		omap_uart_mdr1_errataset(uart, UART_OMAP_MDR1_DISABLE, 0xA0);
+	else
+		serial_write_reg(uart, UART_OMAP_MDR1, UART_OMAP_MDR1_DISABLE);
+
+	serial_write_reg(uart, UART_LCR, UART_LCR_CONF_MODE_B);
 	efr = serial_read_reg(uart, UART_EFR);
 	serial_write_reg(uart, UART_EFR, UART_EFR_ECB);
 	serial_write_reg(uart, UART_LCR, 0x0); /* Operational mode */
 	serial_write_reg(uart, UART_IER, 0x0);
-	serial_write_reg(uart, UART_LCR, 0xBF); /* Config B mode */
+	serial_write_reg(uart, UART_LCR, UART_LCR_CONF_MODE_B);
 	serial_write_reg(uart, UART_DLL, uart->dll);
 	serial_write_reg(uart, UART_DLM, uart->dlh);
 	serial_write_reg(uart, UART_LCR, 0x0); /* Operational mode */
 	serial_write_reg(uart, UART_IER, uart->ier);
-	if (cpu_is_omap44xx()){
-		if (uart->dma_enabled)
-			serial_write_reg(uart, UART_FCR,
-					UART_FCR_DMA_SELECT | 0x51);
-		else
-			serial_write_reg(uart, UART_FCR, 0x51);
-	}
-	serial_write_reg(uart, UART_LCR, 0x80);
+	serial_write_reg(uart, UART_LCR, UART_LCR_CONF_MODE_A);
 	serial_write_reg(uart, UART_MCR, uart->mcr);
-	serial_write_reg(uart, UART_LCR, 0xBF); /* Config B mode */
+	serial_write_reg(uart, UART_LCR, UART_LCR_CONF_MODE_B);
 	serial_write_reg(uart, UART_EFR, efr);
 	serial_write_reg(uart, UART_LCR, UART_LCR_WLEN8);
 	serial_write_reg(uart, UART_OMAP_SCR, uart->scr);
 	serial_write_reg(uart, UART_OMAP_WER, uart->wer);
 	serial_write_reg(uart, UART_OMAP_SYSC, uart->sysc);
-	if (cpu_is_omap44xx()){
-		serial_write_reg(uart, UART_OMAP_MDR1, 0x00); /* UART 16x mode */
-	} else {
-		/* Enable the UART finally */
-		if (uart->dma_enabled)
-			/* This enables the DMA Mode, the FIFO,the Rx and
-			 * Tx FIFO levels. Keeping the UARt Enabled in
-			 * MDR1 Register.
-			 */
-			omap_uart_mdr1_errataset(uart->num, 0x00, \
-					(UART_FCR_DMA_SELECT | 0x51));
-		else
-			/* This enables the FIFO, the Rx and Tx FIFO levels.
-			 * Keeping the UARt Enabled in MDR1 Register.
-			 */
-			omap_uart_mdr1_errataset(uart->num, 0x00, 0x51);
-	}
+
+	if (uart->errata & UART_ERRATA_i202_MDR1_ACCESS)
+		omap_uart_mdr1_errataset(uart, UART_OMAP_MDR1_16X_MODE, 0xA1);
+	else
+		/* UART 16x mode */
+		serial_write_reg(uart, UART_OMAP_MDR1,
+				UART_OMAP_MDR1_16X_MODE);
 }
 #else
 static inline void omap_uart_save_context(struct omap_uart_state *uart) {}
@@ -359,7 +292,6 @@ static inline void omap_uart_enable_clocks(struct omap_uart_state *uart)
 		return;
 
 	omap_device_enable(uart->pdev);
-
 	uart->clocked = 1;
 	omap_uart_restore_context(uart);
 }
@@ -371,16 +303,8 @@ static inline void omap_uart_disable_clocks(struct omap_uart_state *uart)
 	if (!uart->clocked)
 		return;
 
-	/* NOTE : Even if the Uart Active is callec, it can happen at an
-	 * instance, the "omap_uart_active" would return 0, if the communi
-	 * cation is very fast.
-	 */
-	if (omap_is_console_port(uart->num) && omap_uart_active(uart->num))
-		return;
-
 	omap_uart_save_context(uart);
 	uart->clocked = 0;
-
 	omap_device_idle(uart->pdev);
 }
 
@@ -418,82 +342,41 @@ static void omap_uart_disable_wakeup(struct omap_uart_state *uart)
 	}
 }
 
-#define UART_IDLE_MODE 0x0018
-static void omap_uart_smart_idle_enable_nhwmod(struct omap_uart_state *uart,
-		int enable)
-{
-	u16 sysc;
-
-	sysc = serial_read_reg(uart, UART_OMAP_SYSC) & 0x7;
-	sysc &= (~(UART_IDLE_MODE));
-
-	if (enable) {
-		/* Errata 2.15: Force idle if in DMA mode */
-		if (uart->dma_enabled)
-			sysc &= (~(UART_IDLE_MODE));
-		else
-			sysc |= (0x2 << 3);
-	} else {
-		sysc |= 0x1 << 3;
-	}
-	serial_write_reg(uart, UART_OMAP_SYSC, sysc);
-}
-
-static inline int omap_uart_smart_idle_enable_hwmod(struct omap_uart_state *p,
-		int enable)
+static void omap_uart_smart_idle_enable(struct omap_uart_state *p,
+					       int enable)
 {
 	u32 sysc;
-	u32 sidle_mask;
-	u8 sidle_shift;
+        u32 sidle_mask;
+        u8 sidle_shift;
 
-	if (!p->oh->sysconfig->sysc_fields) {
-		WARN(!p->oh->sysconfig->sysc_fields, "offset struct for "
-				"sysconfig not provided!\n");
-		return -EINVAL;
-	}
+        if (!p->oh->sysconfig->sysc_fields) {
+                WARN(!p->oh->sysconfig->sysc_fields, "offset struct for "
+                                "sysconfig not provided!\n");
+                return;
+        }
 
-	sidle_shift = p->oh->sysconfig->sysc_fields->sidle_shift;
-	sidle_mask = (0x3 << sidle_shift);
+        sidle_shift = p->oh->sysconfig->sysc_fields->sidle_shift;
+        sidle_mask = (0x3 << sidle_shift);
 
-	sysc = omap_hwmod_read_sysc(p->oh);
-	sysc &= ~sidle_mask;
+        sysc = omap_hwmod_read_sysc(p->oh);
+        sysc &= ~sidle_mask;
 
-	if (enable) {
-		/**
-		 * Errata 2.15: [UART]:Cannot Acknowledge Idle Requests
-		 * in Smartidle Mode When Configured for DMA Operations.
-		 */
-		if (p->dma_enabled)
-			sysc |= 0x0 << sidle_shift;
-		else
-			sysc |= 0x2 << sidle_shift;
-	} else {
-		sysc |= 0x1 << sidle_shift;
-	}
-	omap_hwmod_write_sysc(sysc, p->oh);
+        if (enable) {
+                /**
+                 * Errata 2.15: [UART]:Cannot Acknowledge Idle Requests
+                 * in Smartidle Mode When Configured for DMA Operations.
+                 */
+                if (p->dma_enabled)
+                        sysc |= 0x0 << sidle_shift;
+                else
+                        sysc |= 0x2 << sidle_shift;
+        } else {
+                sysc |= 0x1 << sidle_shift;
+        }
+        omap_hwmod_write_sysc(sysc, p->oh);
 
-	return 0;
+        return;
 }
-
-/* Both the Platfrom Drivers and Core Drivers have to follow the
- * hwmod implementation. If Platform alone is following and generic
- * driver is not following, it would create conflicts in the implem
- * enttion. Hence for OMAP 3 reverting to the normal implementation
- * for OMAP4 maintaining the hwmod implementation.
- * Revisit : Fix this as soon as possible so that both the drivers
- * follow the hwmods.
- */
-static void omap_uart_smart_idle_enable(struct omap_uart_state *uart,
-						int enable)
-{
-	if (cpu_is_omap44xx())
-		omap_uart_smart_idle_enable_hwmod(uart, enable);
-	else
-		omap_uart_smart_idle_enable_nhwmod(uart, enable);
-
-	return;
-}
-
 
 static void omap_uart_block_sleep(struct omap_uart_state *uart)
 {
@@ -526,16 +409,6 @@ static void omap_uart_idle_timer(unsigned long data)
 {
 	struct omap_uart_state *uart = (struct omap_uart_state *)data;
 
-#ifdef CONFIG_SERIAL_OMAP
-	/* check if the uart port is active
-	 * if port is active then dont allow
-	 * sleep.
-	 */
-	if (omap_uart_active(uart->num)) {
-		omap_uart_block_sleep(uart);
-		return;
-	}
-#endif
 	omap_uart_allow_sleep(uart);
 }
 
@@ -545,7 +418,6 @@ void omap_uart_prepare_idle(int num)
 
 	list_for_each_entry(uart, &uart_list, node) {
 		if (num == uart->num && uart->can_sleep) {
-			omap_uart_enable_rtspullup(uart);
 			omap_uart_disable_clocks(uart);
 			return;
 		}
@@ -557,9 +429,8 @@ void omap_uart_resume_idle(int num)
 	struct omap_uart_state *uart;
 
 	list_for_each_entry(uart, &uart_list, node) {
-		if (num == uart->num) {
+		if (num == uart->num && uart->can_sleep) {
 			omap_uart_enable_clocks(uart);
-			omap_uart_disable_rtspullup(uart);
 
 			/* Check for IO pad wakeup */
 			if (cpu_is_omap34xx() && uart->padconf) {
@@ -570,9 +441,8 @@ void omap_uart_resume_idle(int num)
 			}
 
 			/* Check for normal UART wakeup */
-			if (uart->wk_st && uart->wk_mask)
-				if(__raw_readl(uart->wk_st) & uart->wk_mask)
-					omap_uart_block_sleep(uart);
+			if (__raw_readl(uart->wk_st) & uart->wk_mask)
+				omap_uart_block_sleep(uart);
 			return;
 		}
 	}
@@ -600,27 +470,6 @@ int omap_uart_can_sleep(void)
 			can_sleep = 0;
 			continue;
 		}
-#ifdef CONFIG_SERIAL_OMAP
-		/*
-		 * Check if console uart can idle. For ZOOM boards console uart
-		 * is on debug board (quad uart), which is not an instance in
-		 * omap_uart_state list.
-		 * So, need to check explicitly for cosole uart state as well.
-		 * On ZOOM, UART 0 to 2 are on OMAP and 3rd Uart which will be
-		 * Quart is on debug board.
-		 * Note: quart is not covered by iactivity timeout. Only OMAP
-		 * Uart's are in inact timeout.
-		 *
-		 * REVISIT: Instead of hardcoding the quart number,
-		 * dynamically detect console uart.
-		 *
-		 * BUG!!! hardcoding this value will causea null pointer
-		 * panic if the zoom is booted without a debugboard!!!
-		 */
-		if (machine_is_omap_zoom2() || machine_is_omap_zoom3())
-			if (omap_uart_active(3))
-				can_sleep = 0;
-#endif
 
 		/* This UART can now safely sleep. */
 		omap_uart_allow_sleep(uart);
@@ -648,141 +497,6 @@ static irqreturn_t omap_uart_interrupt(int irq, void *dev_id)
 	return IRQ_NONE;
 }
 
-int omap_uart_cts_wakeup(int uart_no, int state)
-{
-	u32 padconf_cts;
-	u16 v;
-
-	if (unlikely(uart_no < 0 || uart_no > OMAP_MAX_HSUART_PORTS)) {
-		printk(KERN_INFO "Bad uart id %d \n", uart_no);
-		return -EPERM;
-	}
-
-	if (state) {
-		/*
-		 * Enable the CTS for io pad wakeup
-		 */
-		switch (uart_no) {
-		case UART1:
-			printk(KERN_INFO "Enabling CTS wakeup for UART1");
-			padconf_cts = 0x180;
-			v = omap_ctrl_readw(padconf_cts);
-			break;
-		case UART2:
-			printk(KERN_INFO "Enabling CTS wakeup for UART2");
-			padconf_cts = 0x174;
-			v = omap_ctrl_readw(padconf_cts);
-			break;
-		case UART3:
-			printk(KERN_INFO "Enabling CTS wakeup for UART3");
-			padconf_cts = 0x19A;
-			v = omap_ctrl_readw(padconf_cts);
-			break;
-		default:
-			printk(KERN_ERR
-			"Wakeup on Uart%d is not supported\n", uart_no);
-			return -EPERM;
-		}
-
-		v |= ((OMAP_WAKEUP_EN | OMAP_OFF_PULL_EN |
-			OMAP_OFFOUT_VAL | OMAP_OFFOUT_EN |
-			OMAP_OFF_EN | OMAP_PULL_UP |
-			OMAP34XX_MUX_MODE0));
-
-		omap_ctrl_writew(v, padconf_cts);
-	} else {
-		/*
-		 * Disable the CTS capability for io pad wakeup
-		 */
-		switch (uart_no) {
-		case UART1:
-			padconf_cts = 0x180;
-			v = omap_ctrl_readw(padconf_cts);
-			break;
-		case UART2:
-			padconf_cts = 0x174;
-			v = omap_ctrl_readw(padconf_cts);
-			break;
-		case UART3:
-			padconf_cts = 0x19A;
-			v = omap_ctrl_readw(padconf_cts);
-			break;
-		default:
-			printk(KERN_ERR
-			"Wakeup on Uart%d is not supported\n", uart_no);
-			return -EPERM;
-		}
-
-		v &= (u32)(~(OMAP_WAKEUP_EN | OMAP_OFF_PULL_EN |
-				OMAP_OFF_EN | OMAP_OFFOUT_EN));
-
-		omap_ctrl_writew(v, padconf_cts);
-	}
-
-	omap_uart_cts_wakeup_event(uart_no, state);
-
-	return 0;
-}
-EXPORT_SYMBOL(omap_uart_cts_wakeup);
-
-/*
- * This function would return the clocked state to
- * other modules which are not aware if the clock
- * states
- */
-unsigned int omap_get_clock_state(int uart_num)
-{
-	struct omap_uart_state *uart;
-
-	list_for_each_entry(uart, &uart_list, node) {
-		if (uart_num == uart->num)
-			break;
-	}
-	return uart->clocked;
-}
-EXPORT_SYMBOL(omap_get_clock_state);
-
-/*
- * This function enabled clock. This is exported function
- * hence call be called by other module to enable the UART
- * clocks.
- */
-void omap_uart_enable_clock_from_irq(int uart_num)
-{
-	struct omap_uart_state *uart;
-
-	list_for_each_entry(uart, &uart_list, node) {
-		if (uart_num == uart->num) {
-			if (uart->clocked)
-				break;
-			omap_uart_block_sleep(uart);
-			break;
-		}
-	}
-	return;
-}
-EXPORT_SYMBOL(omap_uart_enable_clock_from_irq);
-
-static void omap_uart_rtspad_init(struct omap_uart_state *uart)
-{
-	if (!cpu_is_omap34xx())
-		return;
-	switch (uart->num) {
-	case 0:
-		uart->rts_padconf = 0x17e;
-		break;
-	case 1:
-		uart->rts_padconf = 0x176;
-		break;
-	case 2:
-		uart->rts_padconf = 0x19C;
-		break;
-	default:
-		uart->rts_padconf = 0;
-		break;
-	}
-}
-
 static void omap_uart_idle_init(struct omap_uart_state *uart)
 {
 	int ret;
@@ -796,7 +510,7 @@ static void omap_uart_idle_init(struct omap_uart_state *uart)
 	omap_uart_smart_idle_enable(uart, 0);
 
 	if (cpu_is_omap34xx()) {
-		u32 mod = (uart->num == 2) ? OMAP3430_PER_MOD : CORE_MOD;
+		u32 mod = (uart->num > 1) ? OMAP3430_PER_MOD : CORE_MOD;
 		u32 wk_mask = 0;
 		u32 padconf = 0;
 
@@ -805,19 +519,11 @@ static void omap_uart_idle_init(struct omap_uart_state *uart)
 		switch (uart->num) {
 		case 0:
 			wk_mask = OMAP3430_ST_UART1_MASK;
-#if defined(CONFIG_MACH_OMAP_ZOOM2)
 			padconf = 0x182;
-#elif defined(CONFIG_MACH_OMAP_ZOOM3)
-			padconf = 0x180;
-#endif
 			break;
 		case 1:
 			wk_mask = OMAP3430_ST_UART2_MASK;
-#if defined(CONFIG_MACH_OMAP_ZOOM2)
 			padconf = 0x17a;
-#elif defined(CONFIG_MACH_OMAP_ZOOM3)
-			padconf = 0x174;
-#endif
 			break;
 		case 2:
 			wk_mask = OMAP3430_ST_UART3_MASK;
@@ -828,14 +534,8 @@ static void omap_uart_idle_init(struct omap_uart_state *uart)
 		uart->padconf = padconf;
 	} else if (cpu_is_omap24xx()) {
 		u32 wk_mask = 0;
+		u32 wk_en = PM_WKEN1, wk_st = PM_WKST1;
 
-		if (cpu_is_omap2430()) {
-			uart->wk_en = OMAP2430_PRM_REGADDR(CORE_MOD, PM_WKEN1);
-			uart->wk_st = OMAP2430_PRM_REGADDR(CORE_MOD, PM_WKST1);
-		} else if (cpu_is_omap2420()) {
-			uart->wk_en = OMAP2420_PRM_REGADDR(CORE_MOD, PM_WKEN1);
-			uart->wk_st = OMAP2420_PRM_REGADDR(CORE_MOD, PM_WKST1);
-		}
 		switch (uart->num) {
 		case 0:
 			wk_mask = OMAP24XX_ST_UART1_MASK;
@@ -844,14 +544,22 @@ static void omap_uart_idle_init(struct omap_uart_state *uart)
 			wk_mask = OMAP24XX_ST_UART2_MASK;
 			break;
 		case 2:
+			wk_en = OMAP24XX_PM_WKEN2;
+			wk_st = OMAP24XX_PM_WKST2;
 			wk_mask = OMAP24XX_ST_UART3_MASK;
 			break;
 		}
 		uart->wk_mask = wk_mask;
-
+		if (cpu_is_omap2430()) {
+			uart->wk_en = OMAP2430_PRM_REGADDR(CORE_MOD, wk_en);
+			uart->wk_st = OMAP2430_PRM_REGADDR(CORE_MOD, wk_st);
+		} else if (cpu_is_omap2420()) {
+			uart->wk_en = OMAP2420_PRM_REGADDR(CORE_MOD, wk_en);
+			uart->wk_st = OMAP2420_PRM_REGADDR(CORE_MOD, wk_st);
+		}
 	} else {
-		uart->wk_en = 0;
-		uart->wk_st = 0;
+		uart->wk_en = NULL;
+		uart->wk_st = NULL;
 		uart->wk_mask = 0;
 		uart->padconf = 0;
 	}
@@ -868,14 +576,17 @@ void omap_uart_enable_irqs(int enable)
 	struct omap_uart_state *uart;
 
 	list_for_each_entry(uart, &uart_list, node) {
-		if (enable)
+		if (enable) {
+			pm_runtime_put_sync(&uart->pdev->dev);
 			ret = request_threaded_irq(uart->irq, NULL,
 						   omap_uart_interrupt,
 						   IRQF_SHARED,
 						   "serial idle",
 						   (void *)uart);
-		else
+		} else {
+			pm_runtime_get_noresume(&uart->pdev->dev);
 			free_irq(uart->irq, (void *)uart);
+		}
 	}
 }
 
@@ -900,7 +611,7 @@ static ssize_t sleep_timeout_store(struct device *dev,
 	unsigned int value;
 
 	if (sscanf(buf, "%u", &value) != 1) {
-		printk(KERN_ERR "sleep_timeout_store: Invalid value\n");
+		dev_err(dev, "sleep_timeout_store: Invalid value\n");
 		return -EINVAL;
 	}
 
@@ -914,19 +625,20 @@ static ssize_t sleep_timeout_store(struct device *dev,
 	return n;
 }
 
-DEVICE_ATTR(sleep_timeout, 0644, sleep_timeout_show, sleep_timeout_store);
+static DEVICE_ATTR(sleep_timeout, 0644, sleep_timeout_show,
+		sleep_timeout_store);
 #define DEV_CREATE_FILE(dev, attr) WARN_ON(device_create_file(dev, attr))
 #else
-static inline void omap_uart_idle_init(struct omap_uart_state *uart)
-{
-}
+static inline void omap_uart_idle_init(struct omap_uart_state *uart) {}
 static void omap_uart_block_sleep(struct omap_uart_state *uart)
 {
+	/* Needed to enable UART clocks when built without CONFIG_PM */
+	omap_uart_enable_clocks(uart);
 }
 #define DEV_CREATE_FILE(dev, attr)
 #endif /* CONFIG_PM */
 
-#ifdef CONFIG_SERIAL_8250
+#ifndef CONFIG_SERIAL_OMAP
 /*
  * Override the default 8250 read handler: mem_serial_in()
  * Empty RX fifo read causes an abort on omap3630 and omap4
@@ -941,7 +653,23 @@ static unsigned int serial_in_override(struct uart_port *up, int offset)
 		if (!(lsr & UART_LSR_DR))
 			return -EPERM;
 	}
+
 	return __serial_read_reg(up, offset);
+}
+
+static void serial_out_override(struct uart_port *up, int offset, int value)
+{
+	unsigned int status, tmout = 10000;
+
+	status = __serial_read_reg(up, UART_LSR);
+	while (!(status & UART_LSR_THRE)) {
+		/* Wait up to 10ms for the character(s) to be sent. */
+		if (--tmout == 0)
+			break;
+		udelay(1);
+		status = __serial_read_reg(up, UART_LSR);
+	}
+	__serial_write_reg(up, offset, value);
 }
 #endif
 
@@ -969,15 +697,18 @@ void __init omap_serial_early_init(void)
 		list_add_tail(&uart->node, &uart_list);
 		num_uarts++;
 
-		/* NOTE: omap_hwmod_init() has not yet been called,
-		 *       so no hwmod functions will work yet. */
-#ifdef CONFIG_DEBUG_LL
-		/* For DEBUG_LL, don't reset/idle the UARTs otherwise
-		 * early UART access will fault. */
-		uart->oh->flags |= HWMOD_INIT_NO_IDLE;
-#endif
-	} while(1);
+		/*
+		 * NOTE: omap_hwmod_init() has not yet been called,
+		 *       so no hwmod functions will work yet.
+		 */
 
+		/*
+		 * During UART early init, device need to be probed
+		 * to determine SoC specific init before omap_device
+		 * is ready.  Therefore, don't allow idle here
+		 */
+		uart->oh->flags |= HWMOD_INIT_NO_IDLE | HWMOD_INIT_NO_RESET;
+	} while (1);
 }
 
 /**
@@ -999,129 +730,139 @@ void __init omap_serial_init_port(int port)
 	void *pdata = NULL;
 	u32 pdata_size = 0;
 	char *name;
-#ifdef CONFIG_SERIAL_8250
+#ifndef CONFIG_SERIAL_OMAP
 	struct plat_serial8250_port ports[2] = {
 		{},
 		{.flags = 0},
 	};
 	struct plat_serial8250_port *p = &ports[0];
-#endif
-#ifdef CONFIG_SERIAL_OMAP
+#else
 	struct omap_uart_port_info omap_up;
 #endif
 
-	BUG_ON(port < 0);
-	BUG_ON(port >= num_uarts);
+	if (WARN_ON(port < 0))
+		return;
+	if (WARN_ON(port >= num_uarts))
+		return;
 
 	list_for_each_entry(uart, &uart_list, node)
 		if (port == uart->num)
 			break;
-	{
-		oh = uart->oh;
-		uart->dma_enabled = 0;
-#ifdef CONFIG_SERIAL_8250
-		name = "serial8250";
 
-		/*
-		 * !! 8250 driver does not use standard IORESOURCE* It
-		 * has it's own custom pdata that can be taken from
-		 * the hwmod resource data.  But, this needs to be
-		 * done after the build.
-		 *
-		 * ?? does it have to be done before the register ??
-		 * YES, because platform_device_data_add() copies
-		 * pdata, it does not use a pointer.
-		 */
-		p->flags = UPF_BOOT_AUTOCONF;
-		p->iotype = UPIO_MEM;
-		p->regshift = 2;
-		p->uartclk = OMAP24XX_BASE_BAUD * 16;
-		p->irq = oh->mpu_irqs[0].irq;
-		p->mapbase = oh->slaves[0]->addr->pa_start;
-		p->membase = oh->_rt_va;
-		p->irqflags = IRQF_SHARED;
-		p->private_data = uart;
+	oh = uart->oh;
+	uart->dma_enabled = 0;
+#ifndef CONFIG_SERIAL_OMAP
+	name = "serial8250";
 
-		/* omap44xx: Never read empty UART fifo
-		 * omap3xxx: Never read empty UART fifo on UARTs
-		 * with IP rev >=0x52
-		 */
-		if (cpu_is_omap44xx())
-			p->serial_in = serial_in_override;
+	/*
+	 * !! 8250 driver does not use standard IORESOURCE* It
+	 * has it's own custom pdata that can be taken from
+	 * the hwmod resource data.  But, this needs to be
+	 * done after the build.
+	 *
+	 * ?? does it have to be done before the register ??
+	 * YES, because platform_device_data_add() copies
+	 * pdata, it does not use a pointer.
+	 */
+	p->flags = UPF_BOOT_AUTOCONF;
+	p->iotype = UPIO_MEM;
+	p->regshift = 2;
+	p->uartclk = OMAP24XX_BASE_BAUD * 16;
+	p->irq = oh->mpu_irqs[0].irq;
+	p->mapbase = oh->slaves[0]->addr->pa_start;
+	p->membase = omap_hwmod_get_mpu_rt_va(oh);
+	p->irqflags = IRQF_SHARED;
+	p->private_data = uart;
 
-		pdata = &ports[0];
-		pdata_size = 2 * sizeof(struct plat_serial8250_port);
-#endif
-#ifdef CONFIG_SERIAL_OMAP
-		name = DRIVER_NAME;
+	/*
+	 * omap44xx: Never read empty UART fifo
+	 * omap3xxx: Never read empty UART fifo on UARTs
+	 * with IP rev >=0x52
+	 */
+	uart->regshift = p->regshift;
+	uart->membase = p->membase;
+	if (cpu_is_omap44xx())
+		uart->errata |= UART_ERRATA_FIFO_FULL_ABORT;
+	else if ((serial_read_reg(uart, UART_OMAP_MVER) & 0xFF)
+			>= UART_OMAP_NO_EMPTY_FIFO_READ_IP_REV)
+		uart->errata |= UART_ERRATA_FIFO_FULL_ABORT;
 
-		omap_up.dma_enabled = uart->dma_enabled;
-
-		/* ENABLE DMA MODE UART2 */
-		if (cpu_is_omap34xx() && uart->num == 1) {
-			omap_up.dma_enabled = true;
-			uart->dma_enabled = 1;
-		}
-
-		omap_up.uartclk = OMAP24XX_BASE_BAUD * 16;
-		omap_up.mapbase = oh->slaves[0]->addr->pa_start;
-		omap_up.membase = oh->_rt_va;
-		omap_up.irqflags = IRQF_SHARED;
-		omap_up.flags = UPF_BOOT_AUTOCONF | UPF_SHARE_IRQ;
-		omap_up.regshift = 2;
-
-		pdata = &omap_up;
-		pdata_size = sizeof(struct omap_uart_port_info);
-#endif
-
-		if (WARN_ON(!oh))
-			return;
-
-		od = omap_device_build(name, uart->num, oh, pdata, pdata_size,
-				       omap_uart_latency,
-				       ARRAY_SIZE(omap_uart_latency), 0);
-		WARN(IS_ERR(od), "Could not build omap_device for %s: %s.\n",
-		     name, oh->name);
-
-		uart->irq = oh->mpu_irqs[0].irq;
-		uart->regshift = 2;
-		uart->mapbase = oh->slaves[0]->addr->pa_start;
-		uart->membase = oh->_rt_va;
-		uart->pdev = &od->pdev;
-
-		oh->dev_attr = uart;
-
-#ifdef CONFIG_DEBUG_LL
-		/*
-		 * Because of earlyprintk output, UART did not get idled
-		 * on init.  Now that omap_device is ready, ensure full idle
-		 * before doing omap_device_enable().
-		 */
-		omap_hwmod_idle(uart->oh);
-#endif
-		omap_device_enable(uart->pdev);
-		omap_uart_rtspad_init(uart);
-		omap_uart_idle_init(uart);
-		omap_uart_reset(uart);
-		omap_hwmod_enable_wakeup(uart->oh);
-		omap_device_idle(uart->pdev);
-
-		/*
-		 * Need to block sleep long enough for interrupt driven
-		 * driver to start.  Console driver is in polling mode
-		 * so device needs to be kept enabled while polling driver
-		 * is in use.
-		 */
-		uart->timeout = (30 * HZ);
-		omap_uart_block_sleep(uart);
-		uart->timeout = DEFAULT_TIMEOUT;
-
-		if ((cpu_is_omap34xx() && uart->padconf) ||
-		    (uart->wk_en && uart->wk_mask)) {
-			device_init_wakeup(&od->pdev.dev, true);
-			DEV_CREATE_FILE(&od->pdev.dev, &dev_attr_sleep_timeout);
-		}
+	if (uart->errata & UART_ERRATA_FIFO_FULL_ABORT) {
+		p->serial_in = serial_in_override;
+		p->serial_out = serial_out_override;
 	}
+
+	pdata = &ports[0];
+	pdata_size = 2 * sizeof(struct plat_serial8250_port);
+#else
+
+	name = DRIVER_NAME;
+
+	omap_up.dma_enabled = uart->dma_enabled;
+	omap_up.uartclk = OMAP24XX_BASE_BAUD * 16;
+	omap_up.mapbase = oh->slaves[0]->addr->pa_start;
+	omap_up.membase = oh->_rt_va;
+	omap_up.irqflags = IRQF_SHARED;
+	omap_up.flags = UPF_BOOT_AUTOCONF | UPF_SHARE_IRQ;
+
+	pdata = &omap_up;
+	pdata_size = sizeof(struct omap_uart_port_info);
+#endif
+
+	if (WARN_ON(!oh))
+		return;
+
+	od = omap_device_build(name, uart->num, oh, pdata, pdata_size,
+			       omap_uart_latency,
+			       ARRAY_SIZE(omap_uart_latency), false);
+	WARN(IS_ERR(od), "Could not build omap_device for %s: %s.\n",
+	     name, oh->name);
+
+	uart->irq = oh->mpu_irqs[0].irq;
+	uart->regshift = 2;
+	uart->mapbase = oh->slaves[0]->addr->pa_start;
+	uart->membase = oh->_rt_va;
+	uart->pdev = &od->pdev;
+
+	oh->dev_attr = uart;
+
+	acquire_console_sem(); /* in case the earlycon is on the UART */
+
+	/*
+	 * Because of early UART probing, UART did not get idled
+	 * on init.  Now that omap_device is ready, ensure full idle
+	 * before doing omap_device_enable().
+	 */
+	omap_hwmod_idle(uart->oh);
+
+	omap_device_enable(uart->pdev);
+	omap_uart_idle_init(uart);
+	omap_uart_reset(uart);
+	omap_hwmod_enable_wakeup(uart->oh);
+	omap_device_idle(uart->pdev);
+
+	/*
+	 * Need to block sleep long enough for interrupt driven
+	 * driver to start.  Console driver is in polling mode
+	 * so device needs to be kept enabled while polling driver
+	 * is in use.
+	 */
+	if (uart->timeout)
+		uart->timeout = (30 * HZ);
+	omap_uart_block_sleep(uart);
+	uart->timeout = DEFAULT_TIMEOUT;
+
+	release_console_sem();
+
+	if ((cpu_is_omap34xx() && uart->padconf) ||
+	    (uart->wk_en && uart->wk_mask)) {
+		device_init_wakeup(&od->pdev.dev, true);
+		DEV_CREATE_FILE(&od->pdev.dev, &dev_attr_sleep_timeout);
+	}
+
+	/* Enable the MDR1 errata for OMAP3 */
+	if (cpu_is_omap34xx())
+		uart->errata |= UART_ERRATA_i202_MDR1_ACCESS;
 }
 
 /**

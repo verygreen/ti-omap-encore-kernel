@@ -89,7 +89,11 @@ static struct omap_hwmod omap34xx_l3_hwmod = {
 static struct omap_hwmod omap34xx_l4_wkup_hwmod;
 static struct omap_hwmod omap34xx_uart1;
 static struct omap_hwmod omap34xx_uart2;
+
+#if defined(CONFIG_MACH_OMAP_USE_UART3)
 static struct omap_hwmod omap34xx_uart3;
+#endif	/* CONFIG_MACH_OMAP_USE_UART3 */
+
 static struct omap_hwmod omap34xx_i2c1;
 static struct omap_hwmod omap34xx_i2c2;
 static struct omap_hwmod omap34xx_i2c3;
@@ -145,6 +149,7 @@ static struct omap_hwmod_ocp_if omap3_l4_core__uart2 = {
 	.user		= OCP_USER_MPU | OCP_USER_SDMA,
 };
 
+#if defined(CONFIG_MACH_OMAP_USE_UART3)
 /* L4 PER -> UART3 interface */
 static struct omap_hwmod_addr_space omap34xx_uart3_addr_space[] = {
 	{
@@ -153,6 +158,7 @@ static struct omap_hwmod_addr_space omap34xx_uart3_addr_space[] = {
 		.flags		= ADDR_MAP_ON_INIT | ADDR_TYPE_RT,
 	},
 };
+
 
 static struct omap_hwmod_ocp_if omap3_l4_per__uart3 = {
 	.master		= &omap34xx_l4_per_hwmod,
@@ -163,6 +169,8 @@ static struct omap_hwmod_ocp_if omap3_l4_per__uart3 = {
 	.addr_cnt	= ARRAY_SIZE(omap34xx_uart3_addr_space),
 	.user		= OCP_USER_MPU | OCP_USER_SDMA,
 };
+
+#endif	/* CONFIG_MACH_OMAP_USE_UART3 */
 
 #define OMAP3_I2C1_BASE			(L4_34XX_BASE + 0x70000)
 #define OMAP3_I2C2_BASE			(L4_34XX_BASE + 0x72000)
@@ -719,7 +727,9 @@ static struct omap_hwmod_ocp_if *omap34xx_l4_per_slaves[] = {
 
 /* Master interfaces on the L4_PER interconnect */
 static struct omap_hwmod_ocp_if *omap34xx_l4_per_masters[] = {
+#if defined(CONFIG_MACH_OMAP_USE_UART3)
 	&omap3_l4_per__uart3,
+#endif /* CONFIG_MACH_OMAP_USE_UART3 */
 	&omap34xx_l4_per__gpio2,
 	&omap34xx_l4_per__gpio3,
 	&omap34xx_l4_per__gpio4,
@@ -914,6 +924,7 @@ static struct omap_hwmod omap34xx_uart2 = {
 };
 
 /* UART3 */
+#if defined(CONFIG_MACH_OMAP_USE_UART3)
 
 static struct omap_hwmod_irq_info uart3_mpu_irqs[] = {
 	{ .irq = INT_24XX_UART3_IRQ, },
@@ -948,6 +959,8 @@ static struct omap_hwmod omap34xx_uart3 = {
 	.sysconfig	= &uart_if_ctrl,
 	.omap_chip	= OMAP_CHIP_INIT(CHIP_IS_OMAP3430),
 };
+
+#endif	/* CONFIG_MACH_OMAP_USE_UART3 */
 
 /* I2C common */
 static struct omap_hwmod_sysconfig i2c_if_ctrl = {
@@ -1649,7 +1662,9 @@ static __initdata struct omap_hwmod *omap34xx_hwmods[] = {
 	&omap34xx_mpu_hwmod,
 	&omap34xx_uart1,
 	&omap34xx_uart2,
+#if defined(CONFIG_MACH_OMAP_USE_UART3)
 	&omap34xx_uart3,
+#endif	/* CONFIG_MACH_OMAP_USE_UART3 */
 	&omap34xx_i2c1,
 	&omap34xx_i2c2,
 	&omap34xx_i2c3,

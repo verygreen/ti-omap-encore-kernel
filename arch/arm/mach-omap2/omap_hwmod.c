@@ -1342,6 +1342,11 @@ int omap_hwmod_enable(struct omap_hwmod *oh)
 	return r;
 }
 
+int _omap_hwmod_idle(struct omap_hwmod *oh)
+{
+	return _idle(oh);
+}
+
 /**
  * omap_hwmod_idle - idle an omap_hwmod
  * @oh: struct omap_hwmod *
@@ -1379,6 +1384,11 @@ int omap_hwmod_shutdown(struct omap_hwmod *oh)
 	mutex_unlock(&omap_hwmod_mutex);
 
 	return 0;
+}
+
+int _omap_hwmod_enable(struct omap_hwmod *oh)
+{
+	return _enable(oh);
 }
 
 /**

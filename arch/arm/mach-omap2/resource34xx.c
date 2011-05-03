@@ -429,6 +429,16 @@ int set_opp(struct shared_resource *resp, u32 target_level)
 	int ind;
 
 	if (resp == vdd1_resp) {
+		/* Some drivers call set_opp(vdd1) early in their boot probe
+		 * functions. As cpufreq_register_driver() is placed in the
+		 * late_init section there is a race here. Set opp might
+		 * call cpufreq_notify_transition() while cpufreq_driver=NULL,
+		 * causing kernel panics. So check if cpufreq driver is
+		 * loaded. If not, deny the VDD1 OPP change.
+		 */
+		if (cpufreq_quick_get(0) == 0)
+			return -EBUSY;
+
 		if (target_level < 3)
 			resource_release("vdd2_opp", &vdd2_dev);
 

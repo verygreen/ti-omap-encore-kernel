@@ -236,3 +236,10 @@ config MACH_OMAP_FST_WL127x
 	bool "Enable FlexST for WL127x hardware setup"
 
 endchoice
+
+config MACH_OMAP_USE_UART3
+	bool "Utilize UART3"
+	default y
+	help
+	  Select this if you want to use the UART3 module of your OMAP.
+	  Otherwise deselect it to save power

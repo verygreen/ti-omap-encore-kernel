@@ -73,6 +73,17 @@
 #define UART3			(0x2)
 #define UART4			(0x3)
 
+#define UART_OMAP_MDR1_16X_MODE         0x00    /* UART 16x mode */
+#define UART_OMAP_MDR1_SIR_MODE         0x01    /* SIR mode */
+#define UART_OMAP_MDR1_16X_ABAUD_MODE   0x02    /* UART 16x auto-baud */
+#define UART_OMAP_MDR1_13X_MODE         0x03    /* UART 13x mode */
+#define UART_OMAP_MDR1_MIR_MODE         0x04    /* MIR mode */
+#define UART_OMAP_MDR1_FIR_MODE         0x05    /* FIR mode */
+#define UART_OMAP_MDR1_CIR_MODE         0x06    /* CIR mode */
+#define UART_OMAP_MDR1_DISABLE          0x07    /* Disable (default state) */
+
+#define UART_LCR_CONF_MODE_A    UART_LCR_DLAB   /* Configutation mode A */
+#define UART_LCR_CONF_MODE_B    0xBF            /* Configutation mode B */
 
 #define MSR_SAVE_FLAGS		UART_MSR_ANY_DELTA
 
@@ -139,8 +150,6 @@ struct uart_omap_port {
 	unsigned long		port_activity;
 };
 
-void omap_uart_mdr1_errataset(int uart_no, u8 mdr1_val,
-		u8 fcr_val);
 extern int omap_uart_cts_wakeup(int uart_no, int state);
 extern int omap_uart_cts_wakeup_event(int uart_no, int state);
 extern unsigned int omap_get_clock_state(int uart_num);
