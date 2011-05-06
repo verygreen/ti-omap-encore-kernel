@@ -276,6 +276,30 @@ static struct snd_soc_ops zoom2_pcm_ops = {
 	.hw_params = zoom2_pcm_hw_params,
 };
 
+static int zoom2_fm_hw_params(struct snd_pcm_substream *substream,
+	struct snd_pcm_hw_params *params)
+{
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	struct snd_soc_dai *cpu_dai = rtd->cpu_dai;
+	int ret;
+
+	/* Set cpu DAI configuration */
+	ret = snd_soc_dai_set_fmt(cpu_dai,
+				  SND_SOC_DAIFMT_I2S |
+				  SND_SOC_DAIFMT_NB_NF |
+				  SND_SOC_DAIFMT_CBM_CFM);
+	if (ret < 0) {
+		printk(KERN_ERR "can't set cpu DAI configuration\n");
+		return ret;
+	}
+
+	return 0;
+}
+
+static struct snd_soc_ops zoom2_fm_ops = {
+	.hw_params = zoom2_fm_hw_params,
+};
+
 /* Zoom2 machine DAPM */
 static const struct snd_soc_dapm_widget zoom2_twl4030_dapm_widgets[] = {
 	SND_SOC_DAPM_MIC("Ext Mic", NULL),
@@ -360,6 +384,26 @@ static int zoom2_twl4030_voice_init(struct snd_soc_pcm_runtime *rtd)
 	return 0;
 }
 
+static struct snd_soc_dai_driver dai[] = {
+{
+	.name = "FM Digital",
+	.playback = {
+		.stream_name = "Playback",
+		.channels_min = 1,
+		.channels_max = 2,
+		.rates = SNDRV_PCM_RATE_44100,
+		.formats = SNDRV_PCM_FMTBIT_S16_LE,
+	},
+	.capture = {
+		.stream_name = "Capture",
+		.channels_min = 1,
+		.channels_max = 2,
+		.rates = SNDRV_PCM_RATE_44100,
+		.formats = SNDRV_PCM_FMTBIT_S16_LE,
+	},
+},
+};
+
 /* Digital audio interface glue - connects codec <--> CPU */
 static struct snd_soc_dai_link zoom2_dai[] = {
 	{
@@ -392,6 +436,15 @@ static struct snd_soc_dai_link zoom2_dai[] = {
 		.init = zoom2_twl4030_voice_init,
 		.ops = &zoom2_pcm_ops,
 	},
+	{
+		.name = "TWL4030 FM",
+		.stream_name = "TWL4030 FM",
+		.cpu_dai_name = "omap-mcbsp-dai.3",
+		.codec_dai_name = "FM Digital",
+		.platform_name = "omap-pcm-audio",
+		.no_codec = 1,
+		.ops = &zoom2_fm_ops,
+	},
 };
 
 /* Audio machine driver */
@@ -419,6 +472,8 @@ static int __init zoom2_soc_init(void)
 		printk(KERN_ERR "Platform device allocation failed\n");
 		return -ENOMEM;
 	}
+
+	snd_soc_register_dais(&zoom2_snd_device->dev, dai, ARRAY_SIZE(dai));
 
 	platform_set_drvdata(zoom2_snd_device, &snd_soc_zoom2);
 	ret = platform_device_add(zoom2_snd_device);
