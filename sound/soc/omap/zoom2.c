@@ -155,6 +155,13 @@ static int zoom2_hw_voice_params(struct snd_pcm_substream *substream,
 		return ret;
 	}
 
+	/* set codec Voice IF to application mode*/
+	ret = snd_soc_dai_set_tristate(codec_dai, 0);
+	if (ret) {
+		printk(KERN_ERR "can't disable codec VIF tristate\n");
+		return ret;
+	}
+
 	/* Set the codec system clock for DAC and ADC */
 	ret = snd_soc_dai_set_sysclk(codec_dai, 0, 26000000,
 					SND_SOC_CLOCK_IN);
@@ -163,10 +170,35 @@ static int zoom2_hw_voice_params(struct snd_pcm_substream *substream,
 		return ret;
 	}
 
+	ret = twl4030_cpu_enable_ext_clock(codec_dai->codec, cpu_dai);
+	if (ret < 0) {
+		printk(KERN_ERR "can't set 256 FS clock\n");
+		return ret;
+	}
+
 	return 0;
 }
 
+static void zoom2_voice_shutdown(struct snd_pcm_substream *substream)
+{
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	struct snd_soc_dai *codec_dai = rtd->codec_dai;
+	struct snd_soc_dai *cpu_dai = rtd->cpu_dai;
+	int ret;
+
+	ret = snd_soc_dai_set_tristate(codec_dai, 1);
+	if (ret) {
+		printk(KERN_ERR "can't set codec VIF tristate\n");
+		/* Ignore error and follow through */
+	}
+
+	ret = twl4030_cpu_disable_ext_clock(codec_dai->codec, cpu_dai);
+	if (ret)
+		printk(KERN_ERR "can't set 256 FS clock\n");
+}
+
 static struct snd_soc_ops zoom2_voice_ops = {
+	.shutdown  = zoom2_voice_shutdown,
 	.hw_params = zoom2_hw_voice_params,
 };
 
@@ -267,7 +299,7 @@ static struct snd_soc_dai_link zoom2_dai[] = {
 		.ops = &zoom2_ops,
 	},
 	{
-		.name = "TWL4030 PCM",
+		.name = "TWL4030 VOICE",
 		.stream_name = "TWL4030 Voice",
 		.cpu_dai_name = "omap-mcbsp-dai.2",
 		.codec_dai_name = "twl4030-voice",

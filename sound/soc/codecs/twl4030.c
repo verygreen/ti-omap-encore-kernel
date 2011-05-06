@@ -2305,6 +2305,10 @@ static int twl4030_voice_set_dai_sysclk(struct snd_soc_dai *codec_dai,
 			freq, twl4030->sysclk * 1000);
 		return -EINVAL;
 	}
+
+	twl4030_write(codec, TWL4030_REG_APLL_CTL,
+			TWL4030_APLL_INFREQ_26000KHZ|TWL4030_APLL_EN);
+
 	return 0;
 }
 
@@ -2423,7 +2427,7 @@ static struct snd_soc_dai_driver twl4030_dai[] = {
 	.playback = {
 		.stream_name = "Voice Playback",
 		.channels_min = 1,
-		.channels_max = 1,
+		.channels_max = 2,
 		.rates = SNDRV_PCM_RATE_8000 | SNDRV_PCM_RATE_16000,
 		.formats = SNDRV_PCM_FMTBIT_S16_LE,},
 	.capture = {
