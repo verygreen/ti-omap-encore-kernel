@@ -297,6 +297,11 @@ static int zoom_twl_gpio_setup(struct device *dev,
 	return 0;
 }
 
+/* EXTMUTE callback function */
+static void zoom2_set_hs_extmute(int mute)
+{
+	gpio_set_value(ZOOM2_HEADSET_EXTMUTE_GPIO, mute);
+}
 
 static int zoom_batt_table[] = {
 /* 0 C*/
@@ -330,7 +335,10 @@ static struct twl4030_madc_platform_data zoom_madc_data = {
 };
 
 static struct twl4030_codec_audio_data zoom_audio_data = {
-	.audio_mclk = 26000000,
+	.audio_mclk	= 26000000,
+	.ramp_delay_value = 3, /* 161 ms */
+	.hs_extmute	= 1,
+	.set_hs_extmute	= zoom2_set_hs_extmute,
 };
 
 static struct twl4030_codec_data zoom_codec_data = {
