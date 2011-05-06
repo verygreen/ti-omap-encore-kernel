@@ -439,6 +439,13 @@ static int zoom2_twl4030_init(struct snd_soc_pcm_runtime *rtd)
 	struct snd_soc_codec *codec = rtd->codec;
 	int ret;
 
+	/* Add sidetone control for McBSP2 */
+	ret = omap_mcbsp_st_add_controls(codec, OMAP_MCBSP2);
+	if (ret) {
+		printk(KERN_ERR "Failed to add sidetone control for mcbsp2\n");
+		return ret;
+	}
+
 	/* Add Zoom2 specific widgets */
 	ret = snd_soc_dapm_new_controls(codec->dapm, zoom2_twl4030_dapm_widgets,
 				ARRAY_SIZE(zoom2_twl4030_dapm_widgets));
@@ -472,15 +479,29 @@ static int zoom2_twl4030_init(struct snd_soc_pcm_runtime *rtd)
 	return ret;
 }
 
+static int zoom2_voice_st_initialized;
+
 static int zoom2_twl4030_voice_init(struct snd_soc_pcm_runtime *rtd)
 {
 	struct snd_soc_codec *codec = rtd->codec;
 	unsigned short reg;
+	int ret;
 
 	/* Enable voice interface */
 	reg = codec->driver->read(codec, TWL4030_REG_VOICE_IF);
 	reg |= TWL4030_VIF_DIN_EN | TWL4030_VIF_DOUT_EN | TWL4030_VIF_EN;
 	codec->driver->write(codec, TWL4030_REG_VOICE_IF, reg);
+
+	if (!zoom2_voice_st_initialized) {
+		/* Add sidetone control for McBSP3 */
+		ret = omap_mcbsp_st_add_controls(codec, OMAP_MCBSP3);
+		if (ret) {
+			printk(KERN_ERR
+				"Failed to add sidetone control for mcbsp3\n");
+			return ret;
+		}
+		zoom2_voice_st_initialized = 1;
+	}
 
 	return 0;
 }
@@ -567,6 +588,8 @@ static int __init zoom2_soc_init(void)
 		return -ENODEV;
 	}
 	printk(KERN_INFO "Zoom2 SoC init\n");
+
+	zoom2_voice_st_initialized = 0;
 
 	zoom2_asoc_mux_config(ZOOM2_ASOC_MUX_MCBSP2_SLAVE);
 

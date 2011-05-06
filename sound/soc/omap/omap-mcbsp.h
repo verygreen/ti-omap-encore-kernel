@@ -59,6 +59,7 @@ enum omap_mcbsp_div {
 #define NUM_LINKS	5
 #endif
 
-int omap_mcbsp_st_add_controls(struct snd_soc_codec *codec, int mcbsp_id);
+int omap_mcbsp_st_add_controls(struct snd_soc_codec *codec,
+				 omap_mcbsp_id mcbsp_id);
 
 #endif
