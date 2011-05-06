@@ -38,6 +38,7 @@
 #include "omap-mcbsp.h"
 #include "omap-pcm.h"
 
+#define ZOOM2_BT_MCBSP_GPIO		164
 #define ZOOM2_HEADSET_MUX_GPIO		(OMAP_MAX_GPIO_LINES + 15)
 
 
@@ -202,6 +203,79 @@ static struct snd_soc_ops zoom2_voice_ops = {
 	.hw_params = zoom2_hw_voice_params,
 };
 
+static int zoom2_pcm_hw_params(struct snd_pcm_substream *substream,
+				struct snd_pcm_hw_params *params)
+{
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	struct snd_soc_dai *codec_dai = rtd->codec_dai;
+	struct snd_soc_dai *cpu_dai = rtd->cpu_dai;
+	int ret;
+
+	if (gpio_request(ZOOM2_BT_MCBSP_GPIO, "bt_mux") == 0) {
+		gpio_direction_output(ZOOM2_BT_MCBSP_GPIO, 1);
+		gpio_free(ZOOM2_BT_MCBSP_GPIO);
+	}
+
+	/* Set codec DAI configuration */
+	ret = snd_soc_dai_set_fmt(codec_dai,
+				SND_SOC_DAIFMT_DSP_B |
+				SND_SOC_DAIFMT_NB_IF |
+				SND_SOC_DAIFMT_CBM_CFM);
+	if (ret < 0) {
+		printk(KERN_ERR "can't set codec DAI configuration\n");
+		return ret;
+	}
+
+	/* Set cpu DAI configuration */
+	ret = snd_soc_dai_set_fmt(cpu_dai,
+				SND_SOC_DAIFMT_DSP_B |
+				SND_SOC_DAIFMT_NB_IF |
+				SND_SOC_DAIFMT_CBM_CFM);
+	if (ret < 0) {
+		printk(KERN_ERR "can't set cpu DAI configuration\n");
+		return ret;
+	}
+
+	/* Set the codec system clock for DAC and ADC */
+	ret = snd_soc_dai_set_sysclk(codec_dai, 0, 26000000,
+					SND_SOC_CLOCK_IN);
+	if (ret < 0) {
+		printk(KERN_ERR "can't set codec system clock\n");
+		return ret;
+	}
+
+	ret = snd_soc_dai_set_tristate(codec_dai, 1);
+	if (ret < 0) {
+		printk(KERN_ERR "can't set codec VIF tristate\n");
+		return ret;
+	}
+
+	ret = twl4030_cpu_enable_ext_clock(codec_dai->codec, cpu_dai);
+	if (ret < 0) {
+		printk(KERN_ERR "can't set 256 FS clock\n");
+		return ret;
+	}
+
+	return 0;
+}
+
+static void zoom2_pcm_shutdown(struct snd_pcm_substream *substream)
+{
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	struct snd_soc_dai *codec_dai = rtd->codec_dai;
+	struct snd_soc_dai *cpu_dai = rtd->cpu_dai;
+	int ret;
+
+	ret = twl4030_cpu_disable_ext_clock(codec_dai->codec, cpu_dai);
+	if (ret < 0)
+		printk(KERN_ERR "can't disable 256 FS clock\n");
+}
+
+static struct snd_soc_ops zoom2_pcm_ops = {
+	.shutdown  = zoom2_pcm_shutdown,
+	.hw_params = zoom2_pcm_hw_params,
+};
+
 /* Zoom2 machine DAPM */
 static const struct snd_soc_dapm_widget zoom2_twl4030_dapm_widgets[] = {
 	SND_SOC_DAPM_MIC("Ext Mic", NULL),
@@ -307,6 +381,16 @@ static struct snd_soc_dai_link zoom2_dai[] = {
 		.codec_name = "twl4030-codec",
 		.init = zoom2_twl4030_voice_init,
 		.ops = &zoom2_voice_ops,
+	},
+	{	/* For bluetooth */
+		.name = "TWL4030 PCM",
+		.stream_name = "TWL4030 PCM",
+		.cpu_dai_name = "omap-mcbsp-dai.2",
+		.codec_dai_name = "twl4030-voice",
+		.platform_name = "omap-pcm-audio",
+		.codec_name = "twl4030-codec",
+		.init = zoom2_twl4030_voice_init,
+		.ops = &zoom2_pcm_ops,
 	},
 };
 
