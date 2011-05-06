@@ -207,7 +207,6 @@ static void omap_mcbsp_set_threshold(struct snd_pcm_substream *substream)
 		omap_mcbsp_set_rx_threshold(mcbsp_data->bus_id, words);
 }
 
-#if 0
 static int omap_mcbsp_hwrule_min_buffersize(struct snd_pcm_hw_params *params,
 				    struct snd_pcm_hw_rule *rule)
 {
@@ -226,7 +225,6 @@ static int omap_mcbsp_hwrule_min_buffersize(struct snd_pcm_hw_params *params,
 	frames.integer = 1;
 	return snd_interval_refine(buffer_size, &frames);
 }
-#endif
 
 static int omap_mcbsp_dai_startup(struct snd_pcm_substream *substream,
 				  struct snd_soc_dai *cpu_dai)
@@ -253,12 +251,11 @@ static int omap_mcbsp_dai_startup(struct snd_pcm_substream *substream,
 	 * 2 channels (stereo): size is 128 / 2 = 64 frames (2 * 64 words)
 	 * 4 channels: size is 128 / 4 = 32 frames (4 * 32 words)
 	 */
-	if (cpu_is_omap34xx() || cpu_is_omap44xx()) {
+	if (cpu_is_omap34xx()) {
 		/*
 		* Rule for the buffer size. We should not allow
 		* smaller buffer than the FIFO size to avoid underruns
 		*/
-#if 0 // FIXME: All BE must support hw_rules and constraints */
 		snd_pcm_hw_rule_add(substream->runtime, 0,
 				    SNDRV_PCM_HW_PARAM_CHANNELS,
 				    omap_mcbsp_hwrule_min_buffersize,
@@ -268,7 +265,6 @@ static int omap_mcbsp_dai_startup(struct snd_pcm_substream *substream,
 		/* Make sure, that the period size is always even */
 		snd_pcm_hw_constraint_step(substream->runtime, 0,
 					   SNDRV_PCM_HW_PARAM_PERIOD_SIZE, 2);
-#endif
 	}
 
 	return err;
