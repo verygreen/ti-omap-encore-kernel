@@ -921,10 +921,25 @@ static void headset_ramp(struct snd_soc_codec *codec, int ramp)
 		/* Headset ramp-up according to the TRM */
 		hs_pop |= TWL4030_VMID_EN;
 		twl4030_write(codec, TWL4030_REG_HS_POPN_SET, hs_pop);
+
+		/* Enable power to right if currently powered down */
+		if ((hs_gain & TWL4030_HSR_GAIN) == TWL4030_HSR_GAIN_PWR_DOWN) {
+			hs_gain &= ~TWL4030_HSR_GAIN;
+			hs_gain |= TWL4030_HSR_GAIN_0DB;
+		}
+		/* Enable power to left if currently powered down */
+		if ((hs_gain & TWL4030_HSL_GAIN) == TWL4030_HSL_GAIN_PWR_DOWN) {
+			hs_gain &= ~TWL4030_HSL_GAIN;
+			hs_gain |= TWL4030_HSL_GAIN_0DB;
+		}
+
 		/* Actually write to the register */
 		twl_i2c_write_u8(TWL4030_MODULE_AUDIO_VOICE,
 					hs_gain,
 					TWL4030_REG_HS_GAIN_SET);
+		twl4030_write_reg_cache(codec, TWL4030_REG_HS_GAIN_SET,
+					hs_gain);
+
 		hs_pop |= TWL4030_RAMP_EN;
 		twl4030_write(codec, TWL4030_REG_HS_POPN_SET, hs_pop);
 		/* Wait ramp delay time + 1, so the VMID can settle */
@@ -953,6 +968,8 @@ static void headset_ramp(struct snd_soc_codec *codec, int ramp)
 		twl_i2c_write_u8(TWL4030_MODULE_AUDIO_VOICE,
 					hs_gain & (~0x0f),
 					TWL4030_REG_HS_GAIN_SET);
+		twl4030_write_reg_cache(codec, TWL4030_REG_HS_GAIN_SET,
+					hs_gain);
 
 		hs_pop &= ~TWL4030_VMID_EN;
 		twl4030_write(codec, TWL4030_REG_HS_POPN_SET, hs_pop);
