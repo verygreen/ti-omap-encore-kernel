@@ -458,7 +458,7 @@ static int present_buffer(struct omap_display_buffer *buffer)
 		overlay_info.vaddr = (void *) buffer->virtual_addr;
 		overlay->set_overlay_info(overlay, &overlay_info);
 
-		if (manager) {
+		if (manager && manager->is_enabled(manager)) {
 			manager->apply(manager);
 			display = manager->device;
 			driver = display ? display->driver : NULL;

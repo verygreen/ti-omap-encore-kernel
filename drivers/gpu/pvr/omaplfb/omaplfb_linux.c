@@ -199,7 +199,7 @@ static void OMAPLFBFlipNoLock(OMAPLFB_SWAPCHAIN *psSwapChain,
 		overlay_info.vaddr = framebuffer->screen_base + fb_offset;
 		overlay->set_overlay_info(overlay, &overlay_info);
 
-		if (manager) {
+		if (manager && manager->is_enabled(manager)) {
 			display = manager->device;
 			/* No display attached to this overlay, don't update */
 			if (!display)
