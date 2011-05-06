@@ -40,6 +40,7 @@
 
 #define ZOOM2_HEADSET_MUX_GPIO		(OMAP_MAX_GPIO_LINES + 15)
 
+
 static int zoom2_hw_params(struct snd_pcm_substream *substream,
 				struct snd_pcm_hw_params *params)
 {
@@ -76,10 +77,53 @@ static int zoom2_hw_params(struct snd_pcm_substream *substream,
 		return ret;
 	}
 
+	/* Enable the 256 FS clock for HDMI */
+	ret = twl4030_cpu_enable_ext_clock(codec_dai->codec, cpu_dai);
+	if (ret < 0) {
+		printk(KERN_ERR "can't set 256 FS clock\n");
+		return ret;
+	}
+
+	/* Use external clock for McBSP2 */
+	ret = snd_soc_dai_set_sysclk(cpu_dai, OMAP_MCBSP_SYSCLK_CLKS_EXT,
+					0, SND_SOC_CLOCK_OUT);
+	if (ret < 0) {
+		printk(KERN_ERR "can't set cpu_dai system clock\n");
+		return ret;
+	}
+
+	/*
+	 * Set headset EXTMUTE signal to ON to make sure we
+	 * get correct headset status
+	 */
+	gpio_direction_output(ZOOM2_HEADSET_EXTMUTE_GPIO, 1);
+
 	return 0;
 }
 
+static void zoom2_shutdown(struct snd_pcm_substream *substream)
+{
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	struct snd_soc_dai *codec_dai = rtd->codec_dai;
+	struct snd_soc_dai *cpu_dai = rtd->cpu_dai;
+	int ret;
+
+	/* Use functional clock for McBSP2 */
+	ret = snd_soc_dai_set_sysclk(cpu_dai, OMAP_MCBSP_SYSCLK_CLKS_FCLK,
+					0, SND_SOC_CLOCK_OUT);
+	if (ret < 0) {
+		printk(KERN_ERR "can't set cpu_dai system clock\n");
+		/* Ignore error and follow through */
+	}
+
+	/* Disable the 256 FS clock used for HDMI */
+	ret = twl4030_cpu_disable_ext_clock(codec_dai->codec, cpu_dai);
+	if (ret < 0)
+		printk(KERN_ERR "can't disable 256 FS clock\n");
+}
+
 static struct snd_soc_ops zoom2_ops = {
+	.shutdown  = zoom2_shutdown,
 	.hw_params = zoom2_hw_params,
 };
 
@@ -184,6 +228,8 @@ static int zoom2_twl4030_init(struct snd_soc_pcm_runtime *rtd)
 	snd_soc_dapm_nc_pin(codec->dapm, "CARKITMIC");
 	snd_soc_dapm_nc_pin(codec->dapm, "DIGIMIC0");
 	snd_soc_dapm_nc_pin(codec->dapm, "DIGIMIC1");
+	snd_soc_dapm_nc_pin(codec->dapm, "OUTL");
+	snd_soc_dapm_nc_pin(codec->dapm, "OUTR");
 	snd_soc_dapm_nc_pin(codec->dapm, "EARPIECE");
 	snd_soc_dapm_nc_pin(codec->dapm, "PREDRIVEL");
 	snd_soc_dapm_nc_pin(codec->dapm, "PREDRIVER");
@@ -267,7 +313,8 @@ static int __init zoom2_soc_init(void)
 	gpio_direction_output(ZOOM2_HEADSET_MUX_GPIO, 0);
 
 	BUG_ON(gpio_request(ZOOM2_HEADSET_EXTMUTE_GPIO, "ext_mute") < 0);
-	gpio_direction_output(ZOOM2_HEADSET_EXTMUTE_GPIO, 0);
+	/* Set EXTMUTE on for initial headset detection */
+	gpio_direction_output(ZOOM2_HEADSET_EXTMUTE_GPIO, 1);
 
 	return 0;
 
