@@ -128,8 +128,23 @@ static const u8 twl4030_reg[TWL4030_CACHEREGNUM] = {
 	0x00, /* REG_SW_SHADOW		(0x4A)	- Shadow, non HW register */
 };
 
+/* Maximum number of ASoC DAIs that could be attached to this codec */
+#define TWL4030_MAX_SOC_DAI  32
+
+enum {
+	TWL4030_CODEC_DAI = 0,
+	TWL4030_CPU_DAI   = 1,
+};
+
+/* Used for keeping track of which ASoC DAI had requested the 256 FS clock */
+struct twl4030_soc_dai_info {
+	u8 ext_clk_requested;
+};
+
 /* codec private data */
 struct twl4030_priv {
+	struct mutex lock;
+
 	struct snd_soc_codec codec;
 
 	unsigned int codec_powered;
@@ -155,6 +170,13 @@ struct twl4030_priv {
 
 	/* Delay needed after enabling the digimic interface */
 	unsigned int digimic_delay;
+
+	/* External 256 FS clock reference counter */
+	unsigned int ext_clk_ref;
+
+	/* Indexed by snd_soc_dai.id */
+	struct twl4030_soc_dai_info codec_dai_info[TWL4030_MAX_SOC_DAI];
+	struct twl4030_soc_dai_info cpu_dai_info[TWL4030_MAX_SOC_DAI];
 };
 
 /*
@@ -374,6 +396,161 @@ static void twl4030_apll_enable(struct snd_soc_codec *codec, int enable)
 	if (status >= 0)
 		twl4030_write_reg_cache(codec, TWL4030_REG_APLL_CTL, status);
 }
+
+/*
+ * External 256 FS clock management
+ */
+static int twl4030_set_ext_clock(struct snd_soc_codec *codec, int enable)
+{
+	u8 old_format, format;
+
+	/* get format */
+	old_format = twl4030_read_reg_cache(codec, TWL4030_REG_AUDIO_IF);
+
+	if (enable)
+		format = old_format | TWL4030_CLK256FS_EN;
+	else
+		format = old_format & ~TWL4030_CLK256FS_EN;
+
+	if (format != old_format) {
+		/* clear CODECPDZ before changing format (codec requirement) */
+		twl4030_codec_enable(codec, 0);
+
+		/* change format */
+		twl4030_write(codec, TWL4030_REG_AUDIO_IF, format);
+
+		/* set CODECPDZ afterwards */
+		twl4030_codec_enable(codec, 1);
+	}
+
+	return 0;
+}
+
+static struct twl4030_soc_dai_info *twl4030_get_dai_info(
+	struct snd_soc_codec *codec, struct snd_soc_dai *dai, int dai_type)
+{
+	struct twl4030_priv *twl4030 = snd_soc_codec_get_drvdata(codec);
+	struct twl4030_soc_dai_info *dai_info;
+
+	if ((dai->id < 0) || (dai->id >= TWL4030_MAX_SOC_DAI)) {
+		printk(KERN_ERR "TWL4030 DAI info: invalid ASoC DAI ID (%i)\n",
+		       dai->id);
+		return NULL;
+	}
+
+	switch (dai_type) {
+	case TWL4030_CODEC_DAI:
+		dai_info = &twl4030->codec_dai_info[dai->id];
+		break;
+
+	case TWL4030_CPU_DAI:
+		dai_info = &twl4030->cpu_dai_info[dai->id];
+		break;
+
+	default:
+		printk(KERN_ERR "TWL4030 DAI info: unknown DAI type (%i)\n",
+		       dai_type);
+		dai_info = NULL;
+		break;
+	}
+
+	return dai_info;
+}
+
+static int twl4030_enable_ext_clock(struct snd_soc_codec *codec,
+	struct snd_soc_dai *dai, int dai_type)
+{
+	struct twl4030_priv *twl4030 = snd_soc_codec_get_drvdata(codec);
+	struct twl4030_soc_dai_info *dai_info;
+	int ret = 0;
+
+	dai_info = twl4030_get_dai_info(codec, dai, dai_type);
+	if (dai_info == NULL)
+		return -EINVAL;
+
+	mutex_lock(&twl4030->lock);
+
+	/*
+	 * If this ASoC DAI had already enabled the 256 FS clock, don't allow
+	 * it to get the clock again.  This prevents the clock's reference
+	 * counter from continually increasing if snd_pcm_hw_params() is
+	 * called multiple times since the device had been opened.
+	 */
+	if (dai_info->ext_clk_requested)
+		goto out;
+
+	dai_info->ext_clk_requested = 1;
+
+	if (twl4030->ext_clk_ref == 0)
+		ret = twl4030_set_ext_clock(codec, 1);
+
+	twl4030->ext_clk_ref++;
+
+out:
+	mutex_unlock(&twl4030->lock);
+	return ret;
+}
+
+static int twl4030_disable_ext_clock(struct snd_soc_codec *codec,
+	struct snd_soc_dai *dai, int dai_type)
+{
+	struct twl4030_priv *twl4030 = snd_soc_codec_get_drvdata(codec);
+	struct twl4030_soc_dai_info *dai_info;
+	int ret = 0;
+
+	dai_info = twl4030_get_dai_info(codec, dai, dai_type);
+	if (dai_info == NULL)
+		return -ENODEV;
+
+	mutex_lock(&twl4030->lock);
+
+	if (!dai_info->ext_clk_requested)
+		goto out;
+
+	dai_info->ext_clk_requested = 0;
+
+	if (twl4030->ext_clk_ref == 0) {
+		printk(KERN_ERR "TWL4030 disable external clock: Trying to "
+		       "disable clock with 0 use count\n");
+		goto out;
+	}
+
+	twl4030->ext_clk_ref--;
+
+	if (twl4030->ext_clk_ref == 0)
+		ret = twl4030_set_ext_clock(codec, 0);
+
+out:
+	mutex_unlock(&twl4030->lock);
+	return ret;
+}
+
+static int twl4030_codec_enable_ext_clock(struct snd_soc_codec *codec,
+	struct snd_soc_dai *dai)
+{
+	return twl4030_enable_ext_clock(codec, dai, TWL4030_CODEC_DAI);
+}
+
+static int twl4030_codec_disable_ext_clock(struct snd_soc_codec *codec,
+	struct snd_soc_dai *dai)
+{
+	return twl4030_disable_ext_clock(codec, dai, TWL4030_CODEC_DAI);
+}
+
+int twl4030_cpu_enable_ext_clock(struct snd_soc_codec *codec,
+	struct snd_soc_dai *dai)
+{
+	return twl4030_enable_ext_clock(codec, dai, TWL4030_CPU_DAI);
+}
+EXPORT_SYMBOL_GPL(twl4030_cpu_enable_ext_clock);
+
+int twl4030_cpu_disable_ext_clock(struct snd_soc_codec *codec,
+	struct snd_soc_dai *dai)
+{
+	return twl4030_disable_ext_clock(codec, dai, TWL4030_CPU_DAI);
+}
+EXPORT_SYMBOL_GPL(twl4030_cpu_disable_ext_clock);
+
 
 /* Earpiece */
 static const struct snd_kcontrol_new twl4030_dapm_earpiece_controls[] = {
@@ -1755,6 +1932,9 @@ static void twl4030_shutdown(struct snd_pcm_substream *substream,
 	 /* If the closing substream had 4 channel, do the necessary cleanup */
 	if (substream->runtime->channels == 4)
 		twl4030_tdm_enable(codec, substream->stream, 0);
+
+	/* Disable the 256 FS clock if it had been requested by this DAI */
+	twl4030_codec_disable_ext_clock(codec, dai);
 }
 
 static int twl4030_hw_params(struct snd_pcm_substream *substream,
@@ -1908,6 +2088,7 @@ static int twl4030_set_dai_fmt(struct snd_soc_dai *codec_dai,
 	struct snd_soc_codec *codec = codec_dai->codec;
 	struct twl4030_priv *twl4030 = snd_soc_codec_get_drvdata(codec);
 	u8 old_format, format;
+	int ret;
 
 	/* get format */
 	old_format = twl4030_read_reg_cache(codec, TWL4030_REG_AUDIO_IF);
@@ -1917,11 +2098,14 @@ static int twl4030_set_dai_fmt(struct snd_soc_dai *codec_dai,
 	switch (fmt & SND_SOC_DAIFMT_MASTER_MASK) {
 	case SND_SOC_DAIFMT_CBM_CFM:
 		format &= ~(TWL4030_AIF_SLAVE_EN);
-		format &= ~(TWL4030_CLK256FS_EN);
 		break;
 	case SND_SOC_DAIFMT_CBS_CFS:
 		format |= TWL4030_AIF_SLAVE_EN;
-		format |= TWL4030_CLK256FS_EN;
+
+		/* Slave interface requires the 256 FS clock enabled */
+		ret = twl4030_codec_enable_ext_clock(codec, codec_dai);
+		if (ret)
+			return ret;
 		break;
 	default:
 		return -EINVAL;
@@ -2033,6 +2217,9 @@ static void twl4030_voice_shutdown(struct snd_pcm_substream *substream,
 
 	/* Enable voice digital filters */
 	twl4030_voice_enable(codec, substream->stream, 0);
+
+	/* Disable the 256 FS clock if it had been requested by this DAI */
+	twl4030_codec_disable_ext_clock(codec, dai);
 }
 
 static int twl4030_voice_hw_params(struct snd_pcm_substream *substream,
@@ -2107,6 +2294,7 @@ static int twl4030_voice_set_dai_fmt(struct snd_soc_dai *codec_dai,
 	struct snd_soc_codec *codec = codec_dai->codec;
 	struct twl4030_priv *twl4030 = snd_soc_codec_get_drvdata(codec);
 	u8 old_format, format;
+	int ret;
 
 	/* get format */
 	old_format = twl4030_read_reg_cache(codec, TWL4030_REG_VOICE_IF);
@@ -2119,6 +2307,12 @@ static int twl4030_voice_set_dai_fmt(struct snd_soc_dai *codec_dai,
 		break;
 	case SND_SOC_DAIFMT_CBS_CFS:
 		format |= TWL4030_VIF_SLAVE_EN;
+
+		/* Slave interface requires the 256 FS clock enabled */
+		ret = twl4030_codec_enable_ext_clock(codec, codec_dai);
+		if (ret)
+			return ret;
+
 		break;
 	default:
 		return -EINVAL;
@@ -2243,6 +2437,9 @@ static int twl4030_soc_probe(struct snd_soc_codec *codec)
 		printk("Can not allocate memroy\n");
 		return -ENOMEM;
 	}
+
+	mutex_init(&twl4030->lock);
+
 	snd_soc_codec_set_drvdata(codec, twl4030);
 	/* Set the defaults, and power up the codec */
 	twl4030->sysclk = twl4030_codec_get_mclk() / 1000;
