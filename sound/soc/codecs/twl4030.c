@@ -1841,6 +1841,9 @@ static void twl4030_constraints(struct twl4030_priv *twl4030,
 	else /* This should not happen.. */
 		return;
 
+	if (slv_substream == NULL)
+		return;
+
 	/* Set the constraints according to the already configured stream */
 	snd_pcm_hw_constraint_minmax(slv_substream->runtime,
 				SNDRV_PCM_HW_PARAM_RATE,
