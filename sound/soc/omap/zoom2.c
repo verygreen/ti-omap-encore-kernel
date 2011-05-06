@@ -35,12 +35,103 @@
 /* Register descriptions for twl4030 codec part */
 #include <linux/mfd/twl4030-codec.h>
 
+#include "../../../arch/arm/mach-omap2/mux.h"
 #include "omap-mcbsp.h"
 #include "omap-pcm.h"
 
 #define ZOOM2_BT_MCBSP_GPIO		164
 #define ZOOM2_HEADSET_MUX_GPIO		(OMAP_MAX_GPIO_LINES + 15)
 
+/* McBSP mux config group */
+enum {
+	ZOOM2_ASOC_MUX_MCBSP2_SLAVE = 0,
+	ZOOM2_ASOC_MUX_MCBSP2_MASTER,
+	ZOOM2_ASOC_MUX_MCBSP3_SLAVE,
+	ZOOM2_ASOC_MUX_MCBSP3_MASTER,
+	ZOOM2_ASOC_MUX_MCBSP3_TRISTATE,
+	ZOOM2_ASOC_MUX_MCBSP4_SLAVE,
+	ZOOM2_ASOC_MUX_MCBSP4_MASTER,
+};
+
+
+static int zoom2_asoc_mux_config(int group)
+{
+	switch (group) {
+	case ZOOM2_ASOC_MUX_MCBSP2_SLAVE:
+		omap_mux_init_signal("mcbsp2_fsx.mcbsp2_fsx",
+						OMAP_PIN_INPUT);
+		omap_mux_init_signal("mcbsp2_clkx.mcbsp2_clkx",
+						OMAP_PIN_INPUT);
+		omap_mux_init_signal("mcbsp2_dr.mcbsp2_dr",
+						OMAP_PIN_INPUT);
+		omap_mux_init_signal("mcbsp2_dx.mcbsp2_dx",
+						OMAP_PIN_OUTPUT);
+		break;
+
+	case ZOOM2_ASOC_MUX_MCBSP3_SLAVE:
+		omap_mux_init_signal("mcbsp3_fsx.mcbsp3_fsx",
+						OMAP_PIN_INPUT_PULLDOWN);
+		omap_mux_init_signal("mcbsp3_clkx.mcbsp3_clkx",
+						OMAP_PIN_INPUT_PULLDOWN);
+		omap_mux_init_signal("mcbsp3_dr.mcbsp3_dr",
+						OMAP_PIN_INPUT_PULLDOWN);
+		omap_mux_init_signal("mcbsp3_dx.mcbsp3_dx",
+						OMAP_PIN_OUTPUT);
+		break;
+
+	case ZOOM2_ASOC_MUX_MCBSP3_MASTER:
+		omap_mux_init_signal("mcbsp_clks.mcbsp_clks",
+						OMAP_PIN_INPUT);
+		omap_mux_init_signal("mcbsp3_fsx.mcbsp3_fsx",
+						OMAP_PIN_OUTPUT);
+		omap_mux_init_signal("mcbsp3_clkx.mcbsp3_clkx",
+						OMAP_PIN_OUTPUT);
+		omap_mux_init_signal("mcbsp3_dr.mcbsp3_dr",
+						OMAP_PIN_INPUT_PULLDOWN);
+		omap_mux_init_signal("mcbsp3_dx.mcbsp3_dx",
+						OMAP_PIN_OUTPUT);
+		break;
+
+	case ZOOM2_ASOC_MUX_MCBSP3_TRISTATE:
+		omap_mux_init_signal("mcbsp3_fsx.safe_mode",
+						OMAP_PIN_INPUT);
+		omap_mux_init_signal("mcbsp3_clkx.safe_mode",
+						OMAP_PIN_INPUT);
+		omap_mux_init_signal("mcbsp3_dr.safe_mode",
+						OMAP_PIN_INPUT);
+		omap_mux_init_signal("mcbsp3_dx.safe_mode",
+						OMAP_PIN_INPUT);
+		break;
+
+	case ZOOM2_ASOC_MUX_MCBSP4_MASTER:
+		omap_mux_init_signal("mcbsp_clks.mcbsp_clks",
+						OMAP_PIN_INPUT);
+		omap_mux_init_signal("mcbsp4_fsx.mcbsp4_fsx",
+						OMAP_PIN_OUTPUT);
+		omap_mux_init_signal("gpmc_ncs4.mcbsp4_clkx",
+						OMAP_PIN_OUTPUT);
+		omap_mux_init_signal("gpmc_ncs5.mcbsp4_dr",
+						OMAP_PIN_INPUT);
+		omap_mux_init_signal("gpmc_ncs6.mcbsp4_dx",
+						OMAP_PIN_OUTPUT);
+		break;
+
+	case ZOOM2_ASOC_MUX_MCBSP4_SLAVE:
+		omap_mux_init_signal("mcbsp4_fsx.mcbsp4_fsx",
+						OMAP_PIN_INPUT);
+		omap_mux_init_signal("gpmc_ncs4.mcbsp4_clkx",
+						OMAP_PIN_INPUT);
+		omap_mux_init_signal("gpmc_ncs5.mcbsp4_dr",
+						OMAP_PIN_INPUT);
+		omap_mux_init_signal("gpmc_ncs6.mcbsp4_dx",
+						OMAP_PIN_OUTPUT);
+		break;
+
+	default:
+		return -ENODEV;
+	}
+	return 0;
+}
 
 static int zoom2_hw_params(struct snd_pcm_substream *substream,
 				struct snd_pcm_hw_params *params)
@@ -136,6 +227,8 @@ static int zoom2_hw_voice_params(struct snd_pcm_substream *substream,
 	struct snd_soc_dai *cpu_dai = rtd->cpu_dai;
 	int ret;
 
+	zoom2_asoc_mux_config(ZOOM2_ASOC_MUX_MCBSP3_SLAVE);
+
 	/* Set codec DAI configuration */
 	ret = snd_soc_dai_set_fmt(codec_dai,
 				SND_SOC_DAIFMT_DSP_A |
@@ -187,6 +280,8 @@ static void zoom2_voice_shutdown(struct snd_pcm_substream *substream)
 	struct snd_soc_dai *cpu_dai = rtd->cpu_dai;
 	int ret;
 
+	zoom2_asoc_mux_config(ZOOM2_ASOC_MUX_MCBSP3_TRISTATE);
+
 	ret = snd_soc_dai_set_tristate(codec_dai, 1);
 	if (ret) {
 		printk(KERN_ERR "can't set codec VIF tristate\n");
@@ -215,6 +310,8 @@ static int zoom2_pcm_hw_params(struct snd_pcm_substream *substream,
 		gpio_direction_output(ZOOM2_BT_MCBSP_GPIO, 1);
 		gpio_free(ZOOM2_BT_MCBSP_GPIO);
 	}
+
+	zoom2_asoc_mux_config(ZOOM2_ASOC_MUX_MCBSP3_SLAVE);
 
 	/* Set codec DAI configuration */
 	ret = snd_soc_dai_set_fmt(codec_dai,
@@ -266,6 +363,8 @@ static void zoom2_pcm_shutdown(struct snd_pcm_substream *substream)
 	struct snd_soc_dai *cpu_dai = rtd->cpu_dai;
 	int ret;
 
+	zoom2_asoc_mux_config(ZOOM2_ASOC_MUX_MCBSP3_TRISTATE);
+
 	ret = twl4030_cpu_disable_ext_clock(codec_dai->codec, cpu_dai);
 	if (ret < 0)
 		printk(KERN_ERR "can't disable 256 FS clock\n");
@@ -282,6 +381,8 @@ static int zoom2_fm_hw_params(struct snd_pcm_substream *substream,
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
 	struct snd_soc_dai *cpu_dai = rtd->cpu_dai;
 	int ret;
+
+	zoom2_asoc_mux_config(ZOOM2_ASOC_MUX_MCBSP4_SLAVE);
 
 	/* Set cpu DAI configuration */
 	ret = snd_soc_dai_set_fmt(cpu_dai,
@@ -466,6 +567,8 @@ static int __init zoom2_soc_init(void)
 		return -ENODEV;
 	}
 	printk(KERN_INFO "Zoom2 SoC init\n");
+
+	zoom2_asoc_mux_config(ZOOM2_ASOC_MUX_MCBSP2_SLAVE);
 
 	zoom2_snd_device = platform_device_alloc("soc-audio", -1);
 	if (!zoom2_snd_device) {
