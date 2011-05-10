@@ -1301,6 +1301,11 @@ static int __init omap2_system_dma_init_dev(struct omap_hwmod *oh, void *user)
 
 	pdata->dma_attr		= (struct omap_dma_dev_attr *)oh->dev_attr;
 
+	d = pdata->dma_attr;
+
+	if (cpu_is_omap34xx() && (omap_type() != OMAP2_DEVICE_TYPE_GP))
+		d->dma_dev_attr |= RESERVE_CHANNEL;
+
 	/* Handling Errata's for all OMAP2PLUS processors */
 	pdata->errata			= 0;
 
