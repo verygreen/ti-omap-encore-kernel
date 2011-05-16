@@ -434,6 +434,9 @@ void omap_sram_idle(void)
 		omap_uart_prepare_idle(0);
 		omap_uart_prepare_idle(1);
 		if (core_next_state == PWRDM_POWER_OFF) {
+			prm_set_mod_reg_bits(OMAP3430_AUTO_OFF_MASK,
+						OMAP3430_GR_MOD,
+						OMAP3_PRM_VOLTCTRL_OFFSET);
 			omap3_core_save_context();
 			omap3_prcm_save_context();
 			/* Save MUSB context */
@@ -441,6 +444,9 @@ void omap_sram_idle(void)
 			if (omap_type() != OMAP2_DEVICE_TYPE_GP)
 				omap3_save_secure_ram_context(mpu_next_state);
 		} else {
+			prm_set_mod_reg_bits(OMAP3430_AUTO_RET_MASK,
+						OMAP3430_GR_MOD,
+						OMAP3_PRM_VOLTCTRL_OFFSET);
 			musb_context_save_restore(disable_clk);
 		}
 	}
@@ -495,7 +501,16 @@ void omap_sram_idle(void)
 			prm_clear_mod_reg_bits(OMAP3430_AUTO_OFF_MASK,
 					       OMAP3430_GR_MOD,
 					       OMAP3_PRM_VOLTCTRL_OFFSET);
+		else
+			prm_clear_mod_reg_bits(OMAP3430_AUTO_RET_MASK,
+						OMAP3430_GR_MOD,
+						OMAP3_PRM_VOLTCTRL_OFFSET);
 	}
+	cm_write_mod_reg((1 << OMAP3430_AUTO_PERIPH_DPLL_SHIFT) |
+				(1 << OMAP3430_AUTO_CORE_DPLL_SHIFT),
+				PLL_MOD,
+				CM_AUTOIDLE);
+
 	omap3_intc_resume_idle();
 
 	/* PER */
