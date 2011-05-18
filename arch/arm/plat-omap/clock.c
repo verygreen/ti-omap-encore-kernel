@@ -179,14 +179,15 @@ EXPORT_SYMBOL(clk_round_rate);
 int clk_set_rate(struct clk *clk, unsigned long rate)
 {
 	unsigned long flags;
-	unsigned long new_rate;
+	unsigned long new_rate = rate;
 	unsigned long msg;
 	int ret = -EINVAL;
 
 	if (clk == NULL || IS_ERR(clk))
 		return ret;
 
-	new_rate = clk->round_rate(clk, rate);
+	if (clk->round_rate)
+		new_rate = clk->round_rate(clk, rate);
 	omap_clk_notify_downstream(clk, CLK_PRE_RATE_CHANGE, new_rate);
 
 	spin_lock_irqsave(&clockfw_lock, flags);
