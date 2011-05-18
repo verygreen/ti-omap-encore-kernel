@@ -1060,7 +1060,7 @@ void __init omap_serial_init_port(int port,
 
 	uart->pdev = &od->pdev;
 
-	if (dll_cb_init == 0) {
+	if (cpu_is_omap44xx() && (dll_cb_init == 0)) {
 		uart->nb.notifier_call = omap_uart_recalibrate_baud_cb;
 		uart->nb.next = NULL;
 		func_48m_fclk = clk_get(NULL, "func_48m_fclk");
