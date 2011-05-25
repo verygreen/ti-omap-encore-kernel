@@ -3668,7 +3668,7 @@ static ssize_t isprsz_mode_store(struct device *dev,
 	int ret = 0;
 
 	if (vout->isprsz & ISPRSZ_CONFIGURED) {
-		printk(KERN_ERR, "<%s> could not change isprsz_mode. "
+		printk(KERN_ERR "<%s> could not change isprsz_mode. "
 				"try after isprsz released.\n", __func__);
 		ret = -EBUSY;
 		goto exit;
