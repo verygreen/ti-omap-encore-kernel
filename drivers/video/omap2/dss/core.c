@@ -965,6 +965,25 @@ static int omap_hdmihw_remove(struct platform_device *pdev)
 }
 #endif
 
+#ifdef CONFIG_OMAP2_DSS_VENC
+static int omap_venchw_probe(struct platform_device *pdev)
+{
+	int r;
+
+	r = venc_init(pdev);
+	if (r)
+		DSSERR("Failed to initialize venc\n");
+
+	return r;
+}
+
+static int omap_venchw_remove(struct platform_device *pdev)
+{
+	venc_exit();
+	return 0;
+}
+#endif
+
 static struct platform_driver omap_dss_driver = {
 	.probe          = omap_dss_probe,
 	.remove         = omap_dss_remove,
@@ -1039,6 +1058,20 @@ static struct platform_driver omap_hdmihw_driver = {
 	.resume		= NULL,
 	.driver		= {
 		.name	= "dss_hdmi",
+		.owner	= THIS_MODULE,
+	},
+};
+#endif
+
+#ifdef CONFIG_OMAP2_DSS_VENC
+static struct platform_driver omap_venchw_driver = {
+	.probe		= omap_venchw_probe,
+	.remove		= omap_venchw_remove,
+	.shutdown	= NULL,
+	.suspend	= NULL,
+	.resume		= NULL,
+	.driver		= {
+		.name	= "dss_venc",
 		.owner	= THIS_MODULE,
 	},
 };
@@ -1329,6 +1362,9 @@ static int __init omap_dss_init2(void)
 	platform_driver_register(&omap_dsi2hw_driver);
 #ifdef CONFIG_OMAP2_DSS_HDMI
 	platform_driver_register(&omap_hdmihw_driver);
+#endif
+#ifdef CONFIG_OMAP2_DSS_VENC
+	platform_driver_register(&omap_venchw_driver);
 #endif
 	return platform_driver_register(&omap_dss_driver);
 }
