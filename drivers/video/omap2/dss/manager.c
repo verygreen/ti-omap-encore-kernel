@@ -757,7 +757,7 @@ static int configure_overlay(enum omap_plane plane)
 	u32 paddr;
 	int r;
 	u16 x_decim, y_decim;
-	bool three_tap;
+	bool three_tap = false;
 	u16 orig_w, orig_h, orig_outw, orig_outh;
 	bool source_of_wb = false;
 	DSSDBGF("%d", plane);
