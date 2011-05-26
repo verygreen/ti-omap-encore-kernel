@@ -575,10 +575,12 @@ void isppreview_config_shadow_registers(struct isp_prev_device *isp_prev)
 		isp_reg_writel(dev, ISPPRV_TBL_ADDR_GREEN_G_START,
 			       OMAP3_ISP_IOMEM_PREV, ISPPRV_SET_TBL_ADDR);
 
+		isp_flush(dev);
 		for (ctr = 0; ctr < ISP_GAMMA_TABLE_SIZE; ctr++) {
 			isp_reg_writel(dev, greengamma_table[ctr],
 				       OMAP3_ISP_IOMEM_PREV,
 				       ISPPRV_SET_TBL_DATA);
+			isp_flush(dev);
 		}
 		isp_prev->gg_update = 0;
 	}
@@ -587,10 +589,12 @@ void isppreview_config_shadow_registers(struct isp_prev_device *isp_prev)
 		isp_reg_writel(dev, ISPPRV_TBL_ADDR_RED_G_START,
 			       OMAP3_ISP_IOMEM_PREV, ISPPRV_SET_TBL_ADDR);
 
+		isp_flush(dev);
 		for (ctr = 0; ctr < ISP_GAMMA_TABLE_SIZE; ctr++) {
 			isp_reg_writel(dev, redgamma_table[ctr],
 				       OMAP3_ISP_IOMEM_PREV,
 				       ISPPRV_SET_TBL_DATA);
+			isp_flush(dev);
 		}
 		isp_prev->rg_update = 0;
 	}
@@ -599,10 +603,12 @@ void isppreview_config_shadow_registers(struct isp_prev_device *isp_prev)
 		isp_reg_writel(dev, ISPPRV_TBL_ADDR_BLUE_G_START,
 			       OMAP3_ISP_IOMEM_PREV, ISPPRV_SET_TBL_ADDR);
 
+		isp_flush(dev);
 		for (ctr = 0; ctr < ISP_GAMMA_TABLE_SIZE; ctr++) {
 			isp_reg_writel(dev, bluegamma_table[ctr],
 				       OMAP3_ISP_IOMEM_PREV,
 				       ISPPRV_SET_TBL_DATA);
+			isp_flush(dev);
 		}
 		isp_prev->bg_update = 0;
 	}
