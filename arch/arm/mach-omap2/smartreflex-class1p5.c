@@ -246,6 +246,16 @@ done_calib:
 	 * if the voltage we decided as safe is not the current voltage,
 	 * switch
 	 */
+
+	if (cpu_is_omap3630()) {
+		pr_debug("%s:%s - sr opp margin %d\n", __func__, voltdm->name, volt_data->sr_oppmargin);
+
+		volt_data->volt_calibrated += volt_data->sr_oppmargin;
+		if (volt_data->volt_calibrated > volt_data->volt_nominal) {
+			volt_data->volt_calibrated = volt_data->volt_nominal;
+		}
+	}
+
 	if (volt_data->volt_calibrated != u_volt_current) {
 		pr_debug("%s:%s reconfiguring to voltage %d\n",
 			 __func__, voltdm->name, volt_data->volt_calibrated);

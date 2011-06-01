@@ -79,6 +79,7 @@ struct omap_volt_data {
 	u32	volt_calibrated;
 	u32	volt_dynamic_nominal;
 	u32	sr_nvalue;
+	u32	sr_oppmargin;
 	u8	sr_errminlimit;
 	u8	vp_errgain;
 	u8	abb_type;
