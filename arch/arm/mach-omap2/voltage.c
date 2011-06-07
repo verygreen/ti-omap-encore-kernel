@@ -1967,6 +1967,7 @@ int omap_voltage_calib_reset(struct voltagedomain *voltdm)
 {
 	struct omap_vdd_info *vdd;
 	struct omap_volt_data *volt_data;
+	int i;
 
 	if (IS_ERR_OR_NULL(voltdm)) {
 		pr_warning("%s: VDD specified does not exist!\n", __func__);
@@ -1976,7 +1977,7 @@ int omap_voltage_calib_reset(struct voltagedomain *voltdm)
 	vdd = container_of(voltdm, struct omap_vdd_info, voltdm);
 	volt_data = vdd->volt_data;
 	/* reset the calibrated voltages as 0 */
-	while (volt_data->volt_nominal) {
+	for (i = 0; i < vdd->volt_data_count; i++) {
 		volt_data->volt_calibrated = 0;
 		volt_data++;
 	}
