@@ -2380,6 +2380,30 @@ static int twl4030_voice_set_tristate(struct snd_soc_dai *dai, int tristate)
 	return twl4030_write(codec, TWL4030_REG_VOICE_IF, reg);
 }
 
+/*
+ * The clock DAI ops must implement the hw_params, set_sysclk, and set_fmt
+ * callbacks or the core ASoC driver will return a -EINVAL error when the
+ * PCM stream is opened.
+ */
+static int twl4030_clock_hw_params(struct snd_pcm_substream *substream,
+	struct snd_pcm_hw_params *params, struct snd_soc_dai *dai)
+{
+	return 0;
+}
+
+static int twl4030_clock_set_dai_sysclk(struct snd_soc_dai *codec_dai,
+	int clk_id, unsigned int freq, int dir)
+{
+	return 0;
+}
+
+static int twl4030_clock_set_dai_fmt(struct snd_soc_dai *codec_dai,
+	unsigned int fmt)
+{
+	return 0;
+}
+
+
 #define TWL4030_RATES	 (SNDRV_PCM_RATE_8000_48000)
 #define TWL4030_FORMATS	 (SNDRV_PCM_FMTBIT_S16_LE | SNDRV_PCM_FORMAT_S24_LE)
 
@@ -2399,6 +2423,16 @@ static struct snd_soc_dai_ops twl4030_dai_voice_ops = {
 	.set_sysclk	= twl4030_voice_set_dai_sysclk,
 	.set_fmt	= twl4030_voice_set_dai_fmt,
 	.set_tristate	= twl4030_voice_set_tristate,
+};
+
+/*
+ * The clock DAI is basically a dummy DAI.  Its purpose is to allows
+ * the CPU DAI to manage the TWL4030's external clock.
+ */
+static struct snd_soc_dai_ops twl4030_dai_clock_ops = {
+	.hw_params	= twl4030_clock_hw_params,
+	.set_sysclk	= twl4030_clock_set_dai_sysclk,
+	.set_fmt	= twl4030_clock_set_dai_fmt,
 };
 
 static struct snd_soc_dai_driver twl4030_dai[] = {
@@ -2434,6 +2468,24 @@ static struct snd_soc_dai_driver twl4030_dai[] = {
 		.formats = SNDRV_PCM_FMTBIT_S16_LE,},
 	.ops = &twl4030_dai_voice_ops,
 },
+{
+	.name = "twl4030-clock",
+	.playback = {
+		.stream_name = "Playback",
+		.channels_min = 1,
+		.channels_max = 2,
+		.rates = TWL4030_RATES,
+		.formats = TWL4030_FORMATS},
+	.capture = {
+		.stream_name = "Capture",
+		.channels_min = 1,
+		.channels_max = 2,
+		.rates = TWL4030_RATES,
+		.formats = TWL4030_FORMATS,},
+	.ops = &twl4030_dai_clock_ops,
+},
+
+
 };
 
 static int twl4030_soc_suspend(struct snd_soc_codec *codec, pm_message_t state)

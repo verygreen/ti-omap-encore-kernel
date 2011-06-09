@@ -380,6 +380,7 @@ static int zoom2_fm_hw_params(struct snd_pcm_substream *substream,
 {
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
 	struct snd_soc_dai *cpu_dai = rtd->cpu_dai;
+	struct snd_soc_dai *codec_dai = rtd->codec_dai;
 	int ret;
 
 	zoom2_asoc_mux_config(ZOOM2_ASOC_MUX_MCBSP4_SLAVE);
@@ -394,10 +395,37 @@ static int zoom2_fm_hw_params(struct snd_pcm_substream *substream,
 		return ret;
 	}
 
+	/* Set the codec system clock for DAC and ADC */
+	ret = snd_soc_dai_set_sysclk(codec_dai, 0, 26000000,
+					SND_SOC_CLOCK_IN);
+	if (ret < 0) {
+		printk(KERN_ERR "can't set codec system clock\n");
+		return ret;
+	}
+
+	ret = twl4030_cpu_enable_ext_clock(codec_dai->codec, cpu_dai);
+	if (ret < 0) {
+		printk(KERN_ERR "can't set 256 FS clock\n");
+		return ret;
+	}
+
 	return 0;
 }
 
+static void zoom2_fm_shutdown(struct snd_pcm_substream *substream)
+{
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	struct snd_soc_dai *codec_dai = rtd->codec_dai;
+	struct snd_soc_dai *cpu_dai = rtd->cpu_dai;
+	int ret;
+
+	ret = twl4030_cpu_disable_ext_clock(codec_dai->codec, cpu_dai);
+	if (ret < 0)
+		printk(KERN_ERR "can't disable 256 FS clock\n");
+}
+
 static struct snd_soc_ops zoom2_fm_ops = {
+	.shutdown  = zoom2_fm_shutdown,
 	.hw_params = zoom2_fm_hw_params,
 };
 
@@ -562,9 +590,9 @@ static struct snd_soc_dai_link zoom2_dai[] = {
 		.name = "TWL4030 FM",
 		.stream_name = "TWL4030 FM",
 		.cpu_dai_name = "omap-mcbsp-dai.3",
-		.codec_dai_name = "FM Digital",
+		.codec_dai_name = "twl4030-clock",
 		.platform_name = "omap-pcm-audio",
-		.no_codec = 1,
+		.codec_name = "twl4030-codec",
 		.ops = &zoom2_fm_ops,
 	},
 };
