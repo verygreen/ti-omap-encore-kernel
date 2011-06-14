@@ -592,7 +592,7 @@ static int omap_i2c_xfer_msg(struct i2c_adapter *adap,
 	struct omap_i2c_dev *dev = i2c_get_adapdata(adap);
 	int r;
 	u16 w;
-	static struct pm_qos_request_list *qos_handle;
+	struct pm_qos_request_list *qos_handle = NULL;
 
 	dev_dbg(dev->dev, "addr: 0x%04x, len: %d, flags: 0x%x, stop: %d\n",
 		msg->addr, msg->len, msg->flags, stop);
