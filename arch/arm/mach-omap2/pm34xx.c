@@ -294,6 +294,7 @@ static irqreturn_t prcm_interrupt_handler (int irq, void *dev_id)
 {
 	u32 irqenable_mpu, irqstatus_mpu;
 	int c = 0;
+	int ct = 0;
 
 	irqenable_mpu = prm_read_mod_reg(OCP_MOD,
 					 OMAP3_PRM_IRQENABLE_MPU_OFFSET);
@@ -305,13 +306,15 @@ static irqreturn_t prcm_interrupt_handler (int irq, void *dev_id)
 		if (irqstatus_mpu & (OMAP3430_WKUP_ST_MASK |
 				     OMAP3430_IO_ST_MASK)) {
 			c = _prcm_int_handle_wakeup();
+			ct++;
 
 			/*
 			 * Is the MPU PRCM interrupt handler racing with the
 			 * IVA2 PRCM interrupt handler ?
 			 */
-			WARN(c == 0, "prcm: WARNING: PRCM indicated MPU wakeup "
-			     "but no wakeup sources are marked\n");
+			WARN(!c && (ct == 1), "prcm: WARNING: PRCM indicated "
+				"MPU wakeup but no wakeup sources are "
+				"marked\n");
 		} else {
 			/* XXX we need to expand our PRCM interrupt handler */
 			WARN(1, "prcm: WARNING: PRCM interrupt received, but "
