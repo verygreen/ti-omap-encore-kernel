@@ -377,6 +377,7 @@ void omap_sram_idle(void)
 	int core_prev_state, per_prev_state;
 	u32 sdrc_pwr = 0;
 	int per_state_modified = 0;
+	int per_context_saved = 0;
 
 	if (!_omap_sram_idle)
 		return;
@@ -426,9 +427,9 @@ void omap_sram_idle(void)
 			}
 		}
 		if (per_next_state == PWRDM_POWER_OFF)
-			omap2_gpio_prepare_for_idle(true);
-		else
-			omap2_gpio_prepare_for_idle(false);
+			per_context_saved = 1;
+
+		omap2_gpio_prepare_for_idle(per_context_saved);
 		omap_uart_prepare_idle(2);
 	}
 
@@ -520,10 +521,8 @@ void omap_sram_idle(void)
 	if (per_next_state < PWRDM_POWER_ON) {
 		omap_uart_resume_idle(2);
 		per_prev_state = pwrdm_read_prev_pwrst(per_pwrdm);
-		if (per_prev_state == PWRDM_POWER_OFF)
-			omap2_gpio_resume_after_idle(true);
-		else
-			omap2_gpio_resume_after_idle(false);
+		omap2_gpio_resume_after_idle(per_context_saved);
+
 		if (per_state_modified)
 			pwrdm_set_next_pwrst(per_pwrdm, PWRDM_POWER_OFF);
 	}
@@ -1138,6 +1137,25 @@ static int __init omap3_pm_init(void)
 	omap3_idle_init();
 
 	clkdm_add_wkdep(neon_clkdm, mpu_clkdm);
+
+	/*
+	 * Part of fix for errata i468.
+	 * GPIO pad spurious transition (glitch/spike) upon wakeup
+	 * from SYSTEM OFF mode.
+	 */
+	if (omap_rev() <= OMAP3630_REV_ES1_2) {
+		struct clockdomain *wkup_clkdm;
+
+		clkdm_add_wkdep(per_clkdm, core_clkdm);
+
+		wkup_clkdm = clkdm_lookup("wkup_clkdm");
+		if (wkup_clkdm)
+			clkdm_add_wkdep(per_clkdm, wkup_clkdm);
+		else
+			printk(KERN_ERR "%s: failed to look up wkup clock "
+				"domain\n", __func__);
+	}
+
 	omap3_save_scratchpad_contents();
 err1:
 	return ret;

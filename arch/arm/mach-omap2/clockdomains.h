@@ -776,7 +776,8 @@ static struct clockdomain usbhost_clkdm = {
 static struct clockdomain per_clkdm = {
 	.name		= "per_clkdm",
 	.pwrdm		= { .name = "per_pwrdm" },
-	.flags		= CLKDM_CAN_HWSUP_SWSUP,
+	/* Errata i468. Use hardware supported transition only. */
+	.flags		= CLKDM_CAN_HWSUP,
 	.clkstctrl_reg	= OMAP34XX_CM_REGADDR(OMAP3430_PER_MOD,
 						 OMAP2_CM_CLKSTCTRL),
 	.dep_bit	= OMAP3430_EN_PER_SHIFT,
